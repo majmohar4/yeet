@@ -187,8 +187,12 @@ function filterFiles() {
 function renderFiles(files) {
   const el = document.getElementById('fileList');
   if (!el) return;
+
+  const countEl = document.getElementById('filesCount');
+  if (countEl) countEl.textContent = files.length ? `(${files.length})` : '';
+
   if (!files.length) {
-    el.innerHTML = '<p class="file-list-empty">No active files — drop a file above to get started.</p>';
+    el.innerHTML = '<p class="file-list-empty">No uploads yet.</p>';
     return;
   }
 

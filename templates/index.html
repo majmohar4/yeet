@@ -86,18 +86,19 @@
 
   <div id="errorBox" class="error-box hidden"></div>
 
-  <!-- ── Public visibility note ───────────────────────────────────── -->
-  <p class="upload-public-note">All uploads are publicly visible to everyone.</p>
-
   <!-- ── Search / all uploads ──────────────────────────────────────── -->
   <div class="section-divider"></div>
 
   <div class="files-section">
     <div class="files-header">
-      <span class="files-title">all uploads</span>
+      <div class="files-title-group">
+        <span class="files-title">recent uploads</span>
+        <span id="filesCount" class="files-count"></span>
+        <span class="live-dot" title="auto-refreshes every 30s"></span>
+      </div>
       <div class="search-wrap">
         <input type="text" id="searchInput" class="search-input"
-               placeholder="search by filename…" oninput="filterFiles()">
+               placeholder="search…" oninput="filterFiles()">
         <button class="btn-refresh" onclick="loadFileList()" title="Refresh">↻</button>
       </div>
     </div>
@@ -105,20 +106,22 @@
     <div class="filter-row">
       <select id="filterSize" onchange="filterFiles()" class="filter-select">
         <option value="">any size</option>
-        <option value="small">under 1 MB</option>
+        <option value="small">&lt; 1 MB</option>
         <option value="medium">1–10 MB</option>
-        <option value="large">over 10 MB</option>
+        <option value="large">&gt; 10 MB</option>
       </select>
       <select id="filterStatus" onchange="filterFiles()" class="filter-select">
         <option value="">any status</option>
         <option value="active">active</option>
-        <option value="expired">expired / archived</option>
+        <option value="expired">expired</option>
       </select>
     </div>
 
     <div id="fileList" class="file-list">
-      <p class="file-list-empty">No uploads yet — drop a file above to get started.</p>
+      <p class="file-list-empty">No uploads yet.</p>
     </div>
+
+    <p class="files-public-note">All files are publicly visible · only you can delete your own</p>
   </div>
 
   <!-- ── Deleted files (virus scanner) ──────────────────────────── -->
