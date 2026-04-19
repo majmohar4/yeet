@@ -157,11 +157,8 @@ function getStoredIds() {
 let _allFiles = [];
 
 async function loadFileList() {
-  const ids = getStoredIds();
-  if (!ids.length) { renderFiles([]); return; }
-
   try {
-    const r = await fetch('/api/files?ids=' + ids.join(','));
+    const r = await fetch('/api/files');
     const data = await r.json();
     _allFiles = data.files || [];
     filterFiles();
@@ -190,7 +187,7 @@ function renderFiles(files) {
   const el = document.getElementById('fileList');
   if (!el) return;
   if (!files.length) {
-    el.innerHTML = '<p class="file-list-empty">No uploads yet — drop a file above to get started.</p>';
+    el.innerHTML = '<p class="file-list-empty">No active files — drop a file above to get started.</p>';
     return;
   }
 

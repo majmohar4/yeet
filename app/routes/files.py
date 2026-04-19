@@ -14,11 +14,27 @@ router = APIRouter()
 @router.get("/api/files")
 async def get_files(ids: str = ""):
     """
-    Fetch metadata for a comma-separated list of file IDs.
-    Only returns active (non-archived) files.
+    Fetch metadata for uploaded files.
+    If no IDs are provided, returns all active (non-archived, non-expired) files.
+    If IDs are provided, returns metadata for those specific file IDs.
     """
+    db = await get_db()
+    now = datetime.now(timezone.utc).isoformat()
+
     if not ids.strip():
-        return JSONResponse({"files": []})
+        async with db.execute(
+            "SELECT id, orig_name, file_size, mime_type, expires_at, "
+            "download_count, max_downloads, archived_at, scan_status, "
+            "(password_hash IS NOT NULL) as has_password "
+            "FROM files WHERE archived_at IS NULL AND expires_at > ? "
+            "ORDER BY created_at DESC",
+            (now,),
+        ) as cursor:
+            rows = [dict(r) for r in await cursor.fetchall()]
+        for r in rows:
+            r["expired"] = False
+            r["archived"] = False
+        return JSONResponse({"files": rows})
 
     raw_ids = [i.strip() for i in ids.split(",") if i.strip()]
     # Validate: only hex IDs accepted
@@ -26,8 +42,6 @@ async def get_files(ids: str = ""):
     if not safe_ids:
         return JSONResponse({"files": []})
 
-    db = await get_db()
-    now = datetime.now(timezone.utc).isoformat()
     placeholders = ",".join("?" * len(safe_ids))
     async with db.execute(
         f"SELECT id, orig_name, file_size, mime_type, expires_at, "
