@@ -1,0 +1,31 @@
+# Cloudflare Tunnel configuration for yeet
+# No open inbound ports required — tunnel connects outbound to Cloudflare.
+#
+# Setup:
+#   1. Install cloudflared: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/
+#   2. Authenticate: cloudflared tunnel login
+#   3. Create tunnel: cloudflared tunnel create yeet
+#   4. Create DNS record: cloudflared tunnel route dns yeet yeet.example.com
+#   5. Copy this file to ~/.cloudflared/config.yml (adjust tunnel ID)
+#   6. Start: cloudflared tunnel run yeet
+
+tunnel: YOUR_TUNNEL_ID_HERE   # from: cloudflared tunnel list
+credentials-file: /home/user/.cloudflared/YOUR_TUNNEL_ID_HERE.json
+
+ingress:
+  - hostname: yeet.example.com
+    service: http://localhost:8000
+    originRequest:
+      # Increase timeouts for large file uploads
+      connectTimeout: 30s
+      tlsTimeout: 10s
+      tcpKeepAlive: 30s
+      noHappyEyeballs: false
+      keepAliveConnections: 10
+      keepAliveTimeout: 90s
+      httpHostHeader: yeet.example.com
+      # Disable TLS verification for local plaintext app
+      noTLSVerify: true
+
+  # Catch-all rule (required by cloudflared)
+  - service: http_status:404

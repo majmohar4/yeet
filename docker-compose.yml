@@ -1,0 +1,43 @@
+# yeet — docker-compose.yml
+# Usage: docker compose up -d
+# Copy .env.example to .env and fill in SECRET_KEY before starting.
+#
+# ClamAV is installed directly inside the yeet container, so it works on
+# both ARM64 (Apple Silicon M1/M2/M3) and x86_64 without a separate service.
+
+services:
+
+  # ── Application ──────────────────────────────────────────────────────────────
+  yeet:
+    build: .
+    restart: unless-stopped
+    container_name: yeet
+    ports:
+      - "127.0.0.1:4534:8000"     # bind localhost only — expose via reverse proxy
+    volumes:
+      - yeet_data:/data            # uploads, archive, SQLite DB, config.json, ClamAV definitions
+    env_file:
+      - .env                       # SECRET_KEY, ADMIN_PASSWORD, overrides
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 1536M            # ClamAV needs ~700MB RAM for definitions
+        reservations:
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:4534/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 180s           # First start downloads ClamAV definitions (~2 min)
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  # Uploads, archived files, SQLite database, config.json, ClamAV virus definitions
+  yeet_data:
+    driver: local

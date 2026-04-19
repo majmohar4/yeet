@@ -1,0 +1,569 @@
+#!/usr/bin/env python3
+"""
+yeet CLI — admin tool for the yeet file sharing server.
+
+Admin commands connect to the SQLite database directly.
+Upload/download commands use the HTTP API.
+
+Usage:
+  yeet <command> [args]
+
+Environment:
+  YEET_DB_PATH     Path to yeet.db        (default: /data/yeet.db)
+  YEET_CONFIG_PATH Path to config.json    (default: /data/config.json)
+  YEET_URL         Server URL for API     (default: https://yeet.majmohar.eu)
+  YEET_ADMIN_PASSWORD  Admin password
+"""
+
+import io
+import json
+import os
+import secrets
+import sqlite3
+import sys
+import urllib.parse
+import urllib.request
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+DB_PATH     = os.getenv("YEET_DB_PATH",     "/data/yeet.db")
+CONFIG_PATH = os.getenv("YEET_CONFIG_PATH", "/data/config.json")
+YEET_URL    = os.getenv("YEET_URL",         "https://yeet.majmohar.eu")
+ADMIN_PASS  = os.getenv("YEET_ADMIN_PASSWORD", "")
+ADMIN_USER  = os.getenv("YEET_ADMIN_USER",  "admin")
+
+# ── ANSI colour helpers ───────────────────────────────────────────────────────
+_NO_COLOR = not sys.stdout.isatty()
+def _c(code, text): return text if _NO_COLOR else f"\033[{code}m{text}\033[0m"
+def grn(t): return _c("0;32", t)
+def red(t): return _c("0;31", t)
+def dim(t): return _c("2",    t)
+def yel(t): return _c("0;33", t)
+
+def ok(msg):  print(f"{grn('✓')} {msg}")
+def err(msg): print(f"{red('✗')} {msg}", file=sys.stderr); sys.exit(1)
+def info(msg): print(f"{dim('>')} {msg}")
+
+
+# ── Database helpers ──────────────────────────────────────────────────────────
+
+def _db() -> sqlite3.Connection:
+    if not Path(DB_PATH).exists():
+        err(f"Database not found: {DB_PATH}\n"
+            "  If using Docker: docker exec <container> yeet <command>\n"
+            "  Set YEET_DB_PATH to override.")
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+# ── Config helpers ────────────────────────────────────────────────────────────
+
+def _load_config() -> dict:
+    try:
+        if Path(CONFIG_PATH).exists():
+            return json.loads(Path(CONFIG_PATH).read_text())
+    except Exception as e:
+        print(f"  warning: config.json read error: {e}", file=sys.stderr)
+    return {}
+
+
+def _save_config(data: dict) -> None:
+    Path(CONFIG_PATH).parent.mkdir(parents=True, exist_ok=True)
+    Path(CONFIG_PATH).write_text(json.dumps(data, indent=2))
+
+
+def _parse_size(s: str) -> int:
+    """Parse human size like 500MB, 2GB, 1024 to bytes."""
+    s = s.strip().upper()
+    if s.endswith("GB"):  return int(float(s[:-2]) * 1_073_741_824)
+    if s.endswith("MB"):  return int(float(s[:-2]) * 1_048_576)
+    if s.endswith("KB"):  return int(float(s[:-2]) * 1_024)
+    return int(s)
+
+
+def _fmt_size(b: int) -> str:
+    if b < 1024:        return f"{b} B"
+    if b < 1_048_576:   return f"{b/1024:.1f} KB"
+    if b < 1_073_741_824: return f"{b/1_048_576:.1f} MB"
+    return f"{b/1_073_741_824:.2f} GB"
+
+
+# ── Commands ──────────────────────────────────────────────────────────────────
+
+def cmd_stats(_args):
+    """Show storage usage, file counts, rate limit summary."""
+    with _db() as conn:
+        total_size = conn.execute("SELECT COALESCE(SUM(file_size),0) FROM files WHERE archived_at IS NULL").fetchone()[0]
+        total_files = conn.execute("SELECT COUNT(*) FROM files WHERE archived_at IS NULL").fetchone()[0]
+        archived    = conn.execute("SELECT COUNT(*) FROM files WHERE archived_at IS NOT NULL").fetchone()[0]
+        active_codes = conn.execute(
+            "SELECT COUNT(*) FROM bypass_codes WHERE used=0 AND expires_at > ?",
+            (datetime.now(timezone.utc).isoformat(),)
+        ).fetchone()[0]
+
+    cfg = _load_config()
+    storage_limit = cfg.get("storage_limit", 10_737_418_240)
+    max_file      = cfg.get("max_file_size",    104_857_600)
+    expiry_h      = cfg.get("file_expiry_hours",        24)
+    pct           = (total_size / storage_limit * 100) if storage_limit else 0
+
+    print()
+    print(f"  {'Storage used:':22} {_fmt_size(total_size)} / {_fmt_size(storage_limit)}  ({pct:.1f}%)")
+    print(f"  {'Active files:':22} {total_files}")
+    print(f"  {'Archived files:':22} {archived}")
+    print(f"  {'Max file size:':22} {_fmt_size(max_file)}")
+    print(f"  {'File expiry:':22} {expiry_h}h")
+    print(f"  {'Active bypass codes:':22} {active_codes}")
+    print()
+
+
+def cmd_generate_code(_args):
+    """Generate a single-use bypass code valid for 15 minutes."""
+    code = secrets.token_hex(4).upper()  # 8 hex chars
+    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
+    with _db() as conn:
+        conn.execute(
+            "INSERT INTO bypass_codes (code, expires_at) VALUES (?, ?)",
+            (code, expires_at),
+        )
+        conn.commit()
+    ok(f"Bypass code generated")
+    print()
+    print(f"  Code:    {yel(code)}")
+    print(f"  Expires: {expires_at[:16]} UTC  (15 minutes)")
+    print(f"  Use:     single-use, bypasses all limits")
+    print()
+
+
+def cmd_list_codes(_args):
+    """List all active (unused, non-expired) bypass codes."""
+    now = datetime.now(timezone.utc).isoformat()
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT code, created_at, expires_at FROM bypass_codes "
+            "WHERE used=0 AND expires_at > ? ORDER BY expires_at",
+            (now,),
+        ).fetchall()
+
+    if not rows:
+        print("  No active bypass codes.")
+        return
+
+    print()
+    print(f"  {'CODE':<10}  {'CREATED':<20}  {'EXPIRES':<20}")
+    print(f"  {'-'*10}  {'-'*20}  {'-'*20}")
+    for r in rows:
+        print(f"  {yel(r['code']):<10}  {r['created_at'][:16]:<20}  {r['expires_at'][:16]:<20}")
+    print()
+
+
+def cmd_revoke_code(args):
+    """Delete a bypass code by value."""
+    if not args:
+        err("Usage: yeet revoke-code <CODE>")
+    code = args[0].upper()
+    with _db() as conn:
+        conn.execute("DELETE FROM bypass_codes WHERE code=?", (code,))
+        conn.commit()
+    ok(f"Code {code} revoked (or was already gone).")
+
+
+def cmd_set_file_limit(args):
+    """Set per-file upload size limit. Example: yeet set-file-limit 500MB"""
+    if not args:
+        err("Usage: yeet set-file-limit <size>  (e.g. 500MB, 2GB)")
+    size = _parse_size(args[0])
+    data = _load_config()
+    data["max_file_size"] = size
+    _save_config(data)
+    ok(f"Max file size set to {_fmt_size(size)}")
+    info("Restart the server for this to take effect.")
+
+
+def cmd_set_storage_limit(args):
+    """Set global storage cap. Example: yeet set-storage-limit 50GB"""
+    if not args:
+        err("Usage: yeet set-storage-limit <size>  (e.g. 10GB, 50GB)")
+    size = _parse_size(args[0])
+    data = _load_config()
+    data["storage_limit"] = size
+    _save_config(data)
+    ok(f"Storage limit set to {_fmt_size(size)}")
+    info("Restart the server for this to take effect.")
+
+
+def cmd_set_expiry(args):
+    """Set default file expiry in hours. Example: yeet set-expiry 48"""
+    if not args:
+        err("Usage: yeet set-expiry <hours>")
+    try:
+        h = int(args[0])
+    except ValueError:
+        err("Hours must be an integer.")
+    data = _load_config()
+    data["file_expiry_hours"] = h
+    _save_config(data)
+    ok(f"File expiry set to {h}h")
+    info("Applies to new uploads immediately.")
+
+
+def cmd_delete(args):
+    """Delete a file by ID (moves to archived state + removes from disk)."""
+    if not args:
+        err("Usage: yeet delete <file-id>")
+    fid = args[0]
+    with _db() as conn:
+        row = conn.execute("SELECT filename, orig_name, file_size FROM files WHERE id=?", (fid,)).fetchone()
+        if not row:
+            err(f"File not found: {fid}")
+        info(f"Deleting: {row['orig_name']} ({_fmt_size(row['file_size'])})")
+        # Remove from disk
+        from pathlib import Path as P
+        for base in ["/data/uploads", "/data/archive"]:
+            p = P(base) / fid
+            if p.exists():
+                p.unlink()
+                info(f"Removed: {p}")
+        conn.execute(
+            "UPDATE files SET archived_at=? WHERE id=?",
+            (datetime.now(timezone.utc).isoformat(), fid),
+        )
+        conn.commit()
+    ok(f"Deleted {fid}")
+
+
+def cmd_list(args):
+    """List files. Options: --archived, --limit N"""
+    archived = "--archived" in args
+    limit = 50
+    if "--limit" in args:
+        idx = args.index("--limit")
+        try: limit = int(args[idx + 1])
+        except (IndexError, ValueError): pass
+
+    with _db() as conn:
+        if archived:
+            rows = conn.execute(
+                "SELECT id, orig_name, file_size, archived_at FROM files "
+                "WHERE archived_at IS NOT NULL ORDER BY archived_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            print(f"\n  {dim('Archived files:')}")
+        else:
+            now = datetime.now(timezone.utc).isoformat()
+            rows = conn.execute(
+                "SELECT id, orig_name, file_size, expires_at, download_count FROM files "
+                "WHERE archived_at IS NULL ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            print(f"\n  {dim('Active files:')}")
+
+    if not rows:
+        print("  (none)")
+        return
+
+    for r in rows:
+        r = dict(r)
+        name  = (r["orig_name"] or "")[:40]
+        size  = _fmt_size(r["file_size"])
+        ts    = (r.get("archived_at") or r.get("expires_at") or "")[:10]
+        label = "archived" if archived else f"exp:{ts}"
+        dl    = f"  {r.get('download_count', 0)} dl" if not archived else ""
+        print(f"  {dim(r['id'][:8])}  {name:<42} {size:>9}  {label}{dl}")
+    print()
+
+
+def cmd_list_archived(args):
+    cmd_list(["--archived"] + args)
+
+
+def cmd_logs(args):
+    """Show audit log. Options: --limit N"""
+    limit = 50
+    if "--limit" in args:
+        idx = args.index("--limit")
+        try: limit = int(args[idx + 1])
+        except (IndexError, ValueError): pass
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT ts, action, file_id, client_ip, details FROM audit_log "
+            "ORDER BY ts DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    print()
+    for r in rows:
+        fid = (r["file_id"] or "-")[:8]
+        det = (r["details"] or "")[:40]
+        print(f"  {dim(r['ts'][:16])}  {r['action']:<28}  {fid:<8}  {r['client_ip'] or '-':<15}  {det}")
+    print()
+
+
+def cmd_cleanup(_args):
+    """Trigger the cleanup task manually (archive expired files)."""
+    now = datetime.now(timezone.utc).isoformat()
+    with _db() as conn:
+        expired = conn.execute(
+            "SELECT id FROM files WHERE expires_at <= ? AND archived_at IS NULL",
+            (now,),
+        ).fetchall()
+
+        archived = 0
+        for row in expired:
+            fid = row["id"]
+            from pathlib import Path as P
+            src = P("/data/uploads") / fid
+            dst = P("/data/archive") / fid
+            P("/data/archive").mkdir(parents=True, exist_ok=True)
+            if src.exists():
+                src.rename(dst)
+            conn.execute("UPDATE files SET archived_at=? WHERE id=?", (now, fid))
+            archived += 1
+
+        # Permanently delete files archived > 24h
+        stale = conn.execute(
+            "SELECT id FROM files WHERE archived_at IS NOT NULL "
+            "AND archived_at <= datetime('now', '-24 hours')",
+        ).fetchall()
+        deleted = 0
+        for row in stale:
+            fid = row["id"]
+            for base in ["/data/uploads", "/data/archive"]:
+                p = P(base) / fid
+                if p.exists(): p.unlink()
+            conn.execute("DELETE FROM files WHERE id=?", (fid,))
+            deleted += 1
+
+        # Prune expired codes
+        conn.execute("DELETE FROM bypass_codes WHERE expires_at <= ?", (now,))
+        conn.commit()
+
+    ok(f"Cleanup done: {archived} archived, {deleted} permanently deleted")
+
+
+def cmd_health(_args):
+    """Check server health via HTTP."""
+    try:
+        with urllib.request.urlopen(f"{YEET_URL}/health", timeout=10) as r:
+            data = json.loads(r.read())
+        ok(f"Server is up — {data}")
+    except Exception as e:
+        err(f"Health check failed: {e}")
+
+
+def cmd_upload(args):
+    """Upload a file via HTTP API.
+    Usage: yeet upload <file> [--password <pw>] [--max-downloads <n>] [--bypass-code <code>]
+    """
+    import mimetypes
+
+    file_path = None
+    password  = ""
+    max_dl    = ""
+    bypass    = ""
+
+    it = iter(args)
+    for a in it:
+        if a in ("--password", "-p"):       password = next(it, "")
+        elif a in ("--max-downloads", "-m"): max_dl  = next(it, "")
+        elif a in ("--bypass-code", "-b"):   bypass  = next(it, "")
+        else:                                file_path = a
+
+    if not file_path:
+        err("Usage: yeet upload <file> [--password <pw>] [--max-downloads <n>] [--bypass-code <code>]")
+    if not Path(file_path).exists():
+        err(f"File not found: {file_path}")
+
+    info(f"Uploading {Path(file_path).name}…")
+
+    # Build multipart request using Python stdlib
+    boundary = "---YEET" + secrets.token_hex(8)
+    body_parts = []
+
+    def _field(name, value):
+        return (
+            f"--{boundary}\r\n"
+            f"Content-Disposition: form-data; name=\"{name}\"\r\n\r\n"
+            f"{value}\r\n"
+        ).encode()
+
+    body_parts.append(_field("password", password))
+    body_parts.append(_field("max_downloads", max_dl))
+    body_parts.append(_field("bypass_code", bypass))
+
+    file_bytes = Path(file_path).read_bytes()
+    mime = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
+    fname = Path(file_path).name
+    body_parts.append(
+        f"--{boundary}\r\n"
+        f"Content-Disposition: form-data; name=\"file\"; filename=\"{fname}\"\r\n"
+        f"Content-Type: {mime}\r\n\r\n".encode()
+        + file_bytes + b"\r\n"
+    )
+    body_parts.append(f"--{boundary}--\r\n".encode())
+    body = b"".join(body_parts)
+
+    req = urllib.request.Request(
+        f"{YEET_URL}/upload",
+        data=body,
+        method="POST",
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            data = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        try: body_err = json.loads(e.read()).get("error", str(e))
+        except Exception: body_err = str(e)
+        err(f"Upload failed (HTTP {e.code}): {body_err}")
+    except Exception as e:
+        err(f"Upload failed: {e}")
+
+    ok("Upload complete")
+    print()
+    print(f"  URL:     {data['url']}")
+    print(f"  Expires: {data['expires_at'][:10]}")
+    print(f"  Size:    {_fmt_size(data['size'])}")
+    print(f"  Scan:    {data['scan_status']}")
+    if data.get("bypassed"):
+        print(f"  Bypass:  {yel('yes — limits skipped')}")
+    if data.get("warning"):
+        print(f"  {yel('⚠ ' + data['warning'])}")
+    print()
+
+    # Copy to clipboard if available
+    url = data["url"]
+    try:
+        import subprocess
+        if sys.platform == "darwin":
+            subprocess.run(["pbcopy"], input=url.encode(), check=True)
+            info("URL copied to clipboard")
+        elif sys.platform == "linux":
+            subprocess.run(["xclip", "-selection", "clipboard"], input=url.encode(), check=False)
+    except Exception:
+        pass
+
+
+def cmd_download(args):
+    """Download a file via HTTP API.
+    Usage: yeet download <url> [--output <path>] [--password <pw>]
+    """
+    url = ""
+    output = ""
+    password = ""
+    it = iter(args)
+    for a in it:
+        if a in ("--output", "-o"):   output   = next(it, "")
+        elif a in ("--password", "-p"): password = next(it, "")
+        else:                           url = a
+    if not url:
+        err("Usage: yeet download <url> [--output <path>] [--password <pw>]")
+
+    info("Downloading…")
+
+    if password:
+        data = urllib.parse.urlencode({"password": password}).encode()
+        req = urllib.request.Request(url, data=data, method="POST")
+    else:
+        req = urllib.request.Request(url, method="GET")
+
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            content = r.read()
+            cd = r.headers.get("Content-Disposition", "")
+    except urllib.error.HTTPError as e:
+        err(f"Download failed (HTTP {e.code})")
+    except Exception as e:
+        err(f"Download failed: {e}")
+
+    if not output:
+        # Try to get filename from Content-Disposition
+        if "filename=" in cd:
+            output = cd.split("filename=")[-1].strip('" ')
+        else:
+            output = "download"
+
+    Path(output).write_bytes(content)
+    ok(f"Saved to {output}  ({_fmt_size(len(content))})")
+
+
+def cmd_help(_args):
+    print("""
+  yeet — CLI for the yeet file sharing server
+
+  ENVIRONMENT
+    YEET_DB_PATH          Path to SQLite database  (default: /data/yeet.db)
+    YEET_CONFIG_PATH      Path to config.json      (default: /data/config.json)
+    YEET_URL              Server URL               (default: https://yeet.majmohar.eu)
+
+  ADMIN COMMANDS  (direct database access)
+    stats                     Storage usage, file counts, active codes
+    generate-code             Generate a single-use bypass code (valid 15 min)
+    list-codes                List active bypass codes
+    revoke-code <code>        Delete a bypass code
+    set-file-limit <size>     Set per-file upload limit  (e.g. 500MB, 2GB)
+    set-storage-limit <size>  Set total storage cap      (e.g. 10GB, 50GB)
+    set-expiry <hours>        Set default file expiry    (e.g. 24, 48)
+    delete <file-id>          Delete a file from disk and mark archived
+    list [--archived]         List active or archived files
+    list-archived             List archived files
+    logs [--limit N]          Show audit log
+    cleanup                   Archive expired files now
+
+  UPLOAD / DOWNLOAD  (HTTP API, uses YEET_URL)
+    upload <file>             Upload a file
+      --password <pw>         Protect with password
+      --max-downloads <n>     Limit downloads
+      --bypass-code <code>    Skip all limits
+    download <url>            Download a file
+      --output <path>         Save to specific path
+      --password <pw>         Password for protected file
+    health                    Check server is up
+
+  DOCKER USAGE
+    docker exec <container> yeet generate-code
+    docker exec <container> yeet stats
+
+  EXAMPLES
+    yeet generate-code
+    yeet set-file-limit 500MB
+    yeet upload photo.jpg --bypass-code A1B2C3D4
+    yeet list --limit 20
+    YEET_URL=http://localhost:8000 yeet health
+""")
+
+
+# ── Entry point ────────────────────────────────────────────────────────────────
+_CMDS = {
+    "stats":             cmd_stats,
+    "generate-code":     cmd_generate_code,
+    "list-codes":        cmd_list_codes,
+    "revoke-code":       cmd_revoke_code,
+    "set-file-limit":    cmd_set_file_limit,
+    "set-storage-limit": cmd_set_storage_limit,
+    "set-expiry":        cmd_set_expiry,
+    "delete":            cmd_delete,
+    "list":              cmd_list,
+    "list-archived":     cmd_list_archived,
+    "logs":              cmd_logs,
+    "cleanup":           cmd_cleanup,
+    "health":            cmd_health,
+    "upload":            cmd_upload,
+    "download":          cmd_download,
+    "help":              cmd_help,
+    "--help":            cmd_help,
+    "-h":                cmd_help,
+}
+
+if __name__ == "__main__":
+    args = sys.argv[1:]
+    cmd  = args[0] if args else "help"
+    rest = args[1:]
+
+    fn = _CMDS.get(cmd)
+    if fn is None:
+        print(f"Unknown command: {cmd}", file=sys.stderr)
+        cmd_help([])
+        sys.exit(1)
+
+    fn(rest)
