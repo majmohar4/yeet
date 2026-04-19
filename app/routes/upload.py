@@ -52,6 +52,7 @@ async def upload_file(
     password: str = Form(default=""),
     max_downloads: str = Form(default=""),
     bypass_code: str = Form(default=""),
+    session_id: str = Form(default=""),
 ):
     ip = _client_ip(request)
     ua = request.headers.get("user-agent", "")
@@ -74,7 +75,7 @@ async def upload_file(
     try:
         return await _do_upload(
             request, file, password, max_downloads,
-            ip, ua, max_file, storage_limit, bypassed,
+            ip, ua, max_file, storage_limit, bypassed, session_id,
         )
     finally:
         await concurrent.release(ip)
@@ -82,7 +83,7 @@ async def upload_file(
 
 async def _do_upload(
     request, file, password, max_downloads,
-    ip, ua, max_file, storage_limit, bypassed,
+    ip, ua, max_file, storage_limit, bypassed, session_id="",
 ):
     # ── File size check (before reading full body to fail fast) ───────────────
     content_length = int(request.headers.get("content-length", 0))
@@ -156,15 +157,17 @@ async def _do_upload(
         max_dl = int(max_downloads.strip())
 
     db = await get_db()
+    safe_session = session_id.strip()[:64] if session_id else None
     await db.execute(
         """INSERT INTO files
            (id, filename, orig_name, file_hash, file_size, mime_type,
-            password_hash, expires_at, max_downloads, client_ip, scan_status)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            password_hash, expires_at, max_downloads, client_ip, scan_status,
+            uploader_session)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             file_id, safe_name, file.filename or "file", file_hash,
             len(data), mime_type, password_hash, expires_at,
-            max_dl, ip, scan_status,
+            max_dl, ip, scan_status, safe_session,
         ),
     )
     await db.commit()

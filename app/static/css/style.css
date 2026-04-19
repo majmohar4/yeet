@@ -210,6 +210,11 @@ main { display: flex; justify-content: center; align-items: flex-start; padding:
 .fcr-actions { display: flex; align-items: center; gap: .4rem; flex-shrink: 0; }
 .fcr-link { font-size: .72rem; color: var(--text-dim); text-decoration: none; padding: .25rem .5rem; border: 1px solid var(--border); border-radius: var(--radius); transition: color .15s, border-color .15s; white-space: nowrap; }
 .fcr-link:hover { color: var(--accent); border-color: var(--accent); }
+.fcr-btn-delete { font-size: .72rem; color: var(--orange); background: none; border: 1px solid rgba(251,146,60,.3); border-radius: var(--radius); padding: .25rem .5rem; cursor: pointer; transition: color .15s, border-color .15s; white-space: nowrap; }
+.fcr-btn-delete:hover { color: #ef4444; border-color: rgba(239,68,68,.5); }
+.btn-refresh { background: none; border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-dim); font-size: .9rem; padding: .2rem .5rem; cursor: pointer; transition: color .15s, border-color .15s; line-height: 1; }
+.btn-refresh:hover { color: var(--accent); border-color: var(--accent); }
+.upload-public-note { font-size: .72rem; color: var(--text-dim); text-align: center; margin: .5rem 0 0; }
 
 /* ── Download / file card ── */
 .file-card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg2); padding: 1.5rem; margin-bottom: 1.5rem; text-align: center; }

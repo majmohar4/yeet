@@ -31,7 +31,8 @@ async def init_db() -> None:
             max_downloads  INTEGER,
             archived_at TEXT,
             client_ip   TEXT,
-            scan_status TEXT NOT NULL DEFAULT 'pending'
+            scan_status TEXT NOT NULL DEFAULT 'pending',
+            uploader_session TEXT
         );
 
         -- count-based download rate limit (per hour)
@@ -73,6 +74,12 @@ async def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_audit_ts          ON audit_log(ts);
         CREATE INDEX IF NOT EXISTS idx_audit_action      ON audit_log(action, ts);
     """)
+    # Migration: add uploader_session column to existing databases
+    try:
+        await db.execute("ALTER TABLE files ADD COLUMN uploader_session TEXT")
+        await db.commit()
+    except Exception:
+        pass  # column already exists
     await db.commit()
 
 

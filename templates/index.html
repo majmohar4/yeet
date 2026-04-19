@@ -86,15 +86,19 @@
 
   <div id="errorBox" class="error-box hidden"></div>
 
-  <!-- ── Search / recent uploads ────────────────────────────────── -->
+  <!-- ── Public visibility note ───────────────────────────────────── -->
+  <p class="upload-public-note">All uploads are publicly visible to everyone.</p>
+
+  <!-- ── Search / all uploads ──────────────────────────────────────── -->
   <div class="section-divider"></div>
 
   <div class="files-section">
     <div class="files-header">
-      <span class="files-title">your uploads</span>
+      <span class="files-title">all uploads</span>
       <div class="search-wrap">
         <input type="text" id="searchInput" class="search-input"
                placeholder="search by filename…" oninput="filterFiles()">
+        <button class="btn-refresh" onclick="loadFileList()" title="Refresh">↻</button>
       </div>
     </div>
 

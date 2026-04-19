@@ -15,7 +15,21 @@ const passwordInput = document.getElementById('password');
 const passwordWarn  = document.getElementById('passwordWarn');
 
 let selectedFile = null;
-const LS_KEY = 'yeet_file_ids';
+
+// ── Session management ────────────────────────────────────────────────────────
+const SESSION_KEY = 'yeet_session';
+
+function getSession() {
+  let s = localStorage.getItem(SESSION_KEY);
+  if (!s) {
+    s = ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
+      (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+    localStorage.setItem(SESSION_KEY, s);
+  }
+  return s;
+}
+
+getSession(); // ensure session exists on page load
 
 // ── Drag-and-drop ─────────────────────────────────────────────────────────────
 if (dropZone) {
@@ -57,11 +71,11 @@ if (uploadForm) {
     form.append('password', document.getElementById('password').value || '');
     form.append('max_downloads', document.getElementById('maxDownloads').value || '');
     form.append('bypass_code', document.getElementById('bypassCode')?.value || '');
+    form.append('session_id', getSession());
 
     setLoading(true);
     hideError();
 
-    // Progress bar
     const pw = document.createElement('div'); pw.className = 'progress-wrap';
     const pb = document.createElement('div'); pb.className = 'progress-bar';
     pw.appendChild(pb); uploadForm.appendChild(pw);
@@ -78,7 +92,6 @@ if (uploadForm) {
 
       const json = JSON.parse(data.body);
       if (data.status === 201) {
-        storeFileId(json.id);
         showResult(json);
         loadFileList();
       } else {
@@ -141,24 +154,12 @@ function setLoading(on) {
 function showError(msg) { errorBox.textContent = msg; errorBox.classList.remove('hidden'); }
 function hideError() { errorBox.classList.add('hidden'); }
 
-// ── File ID storage (localStorage) ───────────────────────────────────────────
-function storeFileId(id) {
-  const ids = getStoredIds();
-  if (!ids.includes(id)) ids.unshift(id);
-  localStorage.setItem(LS_KEY, JSON.stringify(ids.slice(0, 50)));
-}
-
-function getStoredIds() {
-  try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); }
-  catch { return []; }
-}
-
 // ── File list ──────────────────────────────────────────────────────────────────
 let _allFiles = [];
 
 async function loadFileList() {
   try {
-    const r = await fetch('/api/files');
+    const r = await fetch('/api/files/all');
     const data = await r.json();
     _allFiles = data.files || [];
     filterFiles();
@@ -170,7 +171,7 @@ function filterFiles() {
   const sizeFilter = document.getElementById('filterSize')?.value || '';
   const statusFilter = document.getElementById('filterStatus')?.value || '';
 
-  let files = _allFiles.filter(f => {
+  const files = _allFiles.filter(f => {
     if (q && !f.orig_name.toLowerCase().includes(q)) return false;
     if (sizeFilter === 'small'  && f.file_size >= 1_048_576) return false;
     if (sizeFilter === 'medium' && (f.file_size < 1_048_576 || f.file_size > 10_485_760)) return false;
@@ -191,6 +192,8 @@ function renderFiles(files) {
     return;
   }
 
+  const mySession = getSession();
+
   el.innerHTML = files.map(f => {
     const archived = f.archived;
     const expired  = f.expired && !archived;
@@ -199,22 +202,47 @@ function renderFiles(files) {
     const status   = archived ? `<span class="fcr-badge badge-warn">archived</span>` :
                      expired  ? `<span class="fcr-badge badge-warn">expired</span>` :
                                 `<span class="fcr-badge badge-ok">active</span>`;
+    const uploaded = f.created_at ? timeAgo(f.created_at) : '';
+    const expires  = f.expires_at ? timeLeft(f.expires_at) : '';
     const dl = archived
       ? `<span class="fcr-meta">⚠ archived — contact <a href="mailto:info@majmohar.eu">info@majmohar.eu</a></span>`
       : `<a href="${url}" class="fcr-link" target="_blank">open</a>
          <a href="${url}" class="fcr-link" download>⬇</a>`;
     const dlCount = f.max_downloads
-      ? ` · ${f.download_count}/${f.max_downloads} downloads`
-      : ` · ${f.download_count} downloads`;
+      ? ` · ${f.download_count}/${f.max_downloads} dl`
+      : ` · ${f.download_count} dl`;
+    const canDelete = f.uploader_session && f.uploader_session === mySession;
+    const deleteBtn = canDelete && !archived
+      ? `<button class="fcr-btn-delete" onclick="deleteFile('${esc(f.id)}')">delete</button>`
+      : '';
     return `
-      <div class="file-card-row${archived ? ' file-card-row--archived' : ''}">
+      <div class="file-card-row${archived ? ' file-card-row--archived' : ''}" id="fcr-${f.id}">
         <div class="fcr-info">
           <div class="fcr-name">${esc(f.orig_name)}${lock}${status}</div>
-          <div class="fcr-meta">${fmtSize(f.file_size)} · exp ${f.expires_at.slice(0,10)}${dlCount}</div>
+          <div class="fcr-meta">${fmtSize(f.file_size)} · ${uploaded} · ${expires}${dlCount}</div>
         </div>
-        <div class="fcr-actions">${dl}</div>
+        <div class="fcr-actions">${dl}${deleteBtn}</div>
       </div>`;
   }).join('');
+}
+
+async function deleteFile(fileId) {
+  if (!confirm('Delete this file? This cannot be undone.')) return;
+  try {
+    const r = await fetch(`/api/files/${fileId}`, {
+      method: 'DELETE',
+      headers: { 'X-Session-ID': getSession() },
+    });
+    if (r.ok) {
+      document.getElementById(`fcr-${fileId}`)?.remove();
+      _allFiles = _allFiles.filter(f => f.id !== fileId);
+    } else {
+      const json = await r.json().catch(() => ({}));
+      alert(json.error || 'Delete failed.');
+    }
+  } catch {
+    alert('Delete failed: network error.');
+  }
 }
 
 // ── Virus / deleted files ─────────────────────────────────────────────────────
@@ -258,6 +286,26 @@ function fmtSize(bytes) {
   return (bytes / 1_048_576).toFixed(2) + ' MB';
 }
 
+function timeAgo(isoStr) {
+  const diff = Date.now() - new Date(isoStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+function timeLeft(isoStr) {
+  const diff = new Date(isoStr).getTime() - Date.now();
+  if (diff <= 0) return 'expired';
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `${mins}m left`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h left`;
+  return `${Math.floor(hrs / 24)}d left`;
+}
+
 function esc(str) {
   return String(str)
     .replace(/&/g, '&amp;')
@@ -268,3 +316,4 @@ function esc(str) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadFileList();
+setInterval(loadFileList, 30000);
