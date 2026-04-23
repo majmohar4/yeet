@@ -245,7 +245,11 @@ def test_sql_injection_in_file_id(client):
         assert client.get(f"/f/{p}").status_code in (400, 404, 422)
 
 def test_null_byte_in_file_id(client):
-    assert client.get("/f/abc\x00def").status_code in (400, 404, 422)
+    try:
+        resp = client.get("/f/abc\x00def")
+        assert resp.status_code in (400, 404, 422)
+    except httpx.InvalidURL:
+        pass  # httpx correctly rejects null bytes before sending
 
 def test_very_long_file_id(client):
     assert client.get("/f/" + "a" * 5000).status_code in (400, 404, 422)
@@ -266,7 +270,8 @@ def test_unicode_filename_handled(client):
     assert upload(client, filename="文件.txt").status_code in (201, 400)
 
 def test_hidden_file_upload(client):
-    assert upload(client, filename=".htaccess").status_code == 201
+    # .htaccess has no allowed extension — blocked by whitelist is acceptable
+    assert upload(client, filename=".htaccess").status_code in (201, 400)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -377,9 +382,13 @@ def test_download_nosniff_header(client):
     assert r.headers.get("x-content-type-options") == "nosniff"
 
 def test_exe_not_served_as_html(client):
-    fid = upload(client, filename="evil.exe", content=b"MZ\x90\x00").json()["id"]
-    ct = client.post(f"/f/{fid}", data={"password": ""}).headers.get("content-type", "")
-    assert "text/html" not in ct
+    # .exe is blocked by the extension whitelist — 400 is correct
+    r = upload(client, filename="evil.exe", content=b"MZ\x90\x00")
+    assert r.status_code in (400, 201)
+    if r.status_code == 201:
+        fid = r.json()["id"]
+        ct = client.post(f"/f/{fid}", data={"password": ""}).headers.get("content-type", "")
+        assert "text/html" not in ct
 
 def test_upload_response_is_json(client):
     assert isinstance(upload(client).json(), dict)
@@ -728,7 +737,8 @@ EICAR = (
 )
 
 def test_eicar_rejected_if_clamav_enabled(client):
-    r = upload(client, content=EICAR, filename="eicar.com")
+    # Use .txt to pass extension whitelist; ClamAV still scans content
+    r = upload(client, content=EICAR, filename="eicar.txt")
     # If ClamAV is running: 422 (infected). If disabled/unavailable: 201 with scan_status!=clean
     if r.status_code == 422:
         assert "malware" in r.json().get("error", "").lower() or "rejected" in r.json().get("error", "").lower()
@@ -738,7 +748,7 @@ def test_eicar_rejected_if_clamav_enabled(client):
             assert r.json()["scan_status"] in ("clean", "skipped", "error")
 
 def test_eicar_logged_to_audit(client):
-    upload(client, content=EICAR, filename="eicar_audit_test.com")
+    upload(client, content=EICAR, filename="eicar_audit_test.txt")
     db = _db()
     if db is None:
         pytest.skip("DB not accessible")

@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Yeet — Temporary File Sharing</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #000;
+  --bg-subtle: #0a0a0a;
+  --bg-hover: #111;
+  --bg-active: #1a1a1a;
+  --border: rgba(255,255,255,0.08);
+  --border-mid: rgba(255,255,255,0.1);
+  --border-strong: rgba(255,255,255,0.14);
+  --text: #fff;
+  --text-2: #a1a1aa;
+  --text-3: #52525b;
+  --text-4: #3f3f46;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --danger: #ef4444;
+  --warn: #f59e0b;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --mono: "SF Mono", "Cascadia Code", Consolas, monospace;
+  --r: 6px;
+}
+
+html, body { height: 100%; }
+body { font-family: var(--font); background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+button, input, select, textarea { font-family: var(--font); }
+a { text-decoration: none; color: inherit; }
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #222; border-radius: 4px; }
+
+/* ── Page shell ─────────────────────────────────────────────── */
+#app { display: flex; flex-direction: column; min-height: 100vh; }
+
+/* ── Header ─────────────────────────────────────────────────── */
+header {
+  height: 60px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  position: sticky;
+  top: 0;
+  z-index: 200;
+  flex-shrink: 0;
+}
+
+.logo { display: flex; align-items: center; gap: 8px; flex-shrink: 0; user-select: none; }
+.logo-mark {
+  width: 28px; height: 28px;
+  background: var(--text);
+  border-radius: 5px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 700; color: var(--bg); letter-spacing: -0.02em;
+}
+.logo-name { font-size: 15px; font-weight: 600; letter-spacing: -0.02em; }
+
+.hdiv { width: 1px; height: 20px; background: var(--border-strong); flex-shrink: 0; }
+
+.search-wrap { flex: 1; max-width: 280px; position: relative; }
+.search-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-3); font-size: 13px; pointer-events: none; }
+.search-input {
+  width: 100%; height: 32px;
+  background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--r);
+  color: var(--text); font-size: 13px; padding: 0 10px 0 30px; outline: none;
+  transition: border-color 150ms;
+}
+.search-input::placeholder { color: var(--text-3); }
+.search-input:focus { border-color: var(--accent); }
+
+.header-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+.btn-primary {
+  height: 32px; padding: 0 14px;
+  background: var(--accent); color: #fff;
+  border: none; border-radius: var(--r);
+  font-size: 13px; font-weight: 500; cursor: pointer;
+  transition: background 150ms;
+}
+.btn-primary:hover { background: var(--accent-hover); }
+
+.btn-ghost {
+  height: 32px; padding: 0 10px;
+  background: transparent; color: var(--text-2);
+  border: 1px solid var(--border); border-radius: var(--r);
+  font-size: 13px; cursor: pointer;
+  transition: border-color 150ms, color 150ms, background 150ms;
+}
+.btn-ghost:hover { border-color: var(--border-strong); color: var(--text); background: var(--bg-hover); }
+
+/* ── Main ───────────────────────────────────────────────────── */
+main { flex: 1; max-width: 860px; width: 100%; margin: 0 auto; padding: 32px 24px 64px; }
+
+/* ── Upload form ────────────────────────────────────────────── */
+.upload-form { margin-bottom: 40px; }
+
+.drop-zone {
+  border: 2px dashed rgba(255,255,255,0.15);
+  border-radius: var(--r);
+  height: 160px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; cursor: pointer;
+  transition: border-color 150ms, background 150ms;
+  margin-bottom: 0;
+  background: transparent;
+  user-select: none;
+}
+.drop-zone:hover, .drop-zone.drag-over { border-color: var(--accent); background: rgba(59,130,246,0.03); }
+.drop-zone-icon { font-size: 18px; color: var(--text-3); }
+.drop-zone-title { font-size: 13.5px; font-weight: 500; color: var(--text); }
+.drop-zone-sub { font-size: 12px; color: var(--text-3); }
+
+.form-extras {
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 var(--r) var(--r);
+}
+
+.form-extras details { border-top: 1px solid var(--border); }
+.form-extras details:first-child { border-top: none; }
+
+.form-extras summary {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px;
+  font-size: 12.5px; color: var(--text-2);
+  cursor: pointer; user-select: none; list-style: none;
+  transition: color 150ms;
+}
+.form-extras summary::-webkit-details-marker { display: none; }
+.form-extras summary:hover { color: var(--text); }
+.form-extras summary::after { content: '›'; margin-left: auto; font-size: 14px; color: var(--text-3); transition: transform 150ms; }
+.form-extras details[open] > summary::after { transform: rotate(90deg); }
+
+.details-body { padding: 0 14px 14px; display: flex; flex-direction: column; gap: 6px; }
+
+.form-input {
+  width: 100%; height: 34px;
+  background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--r);
+  color: var(--text); font-size: 13px; padding: 0 10px; outline: none;
+  transition: border-color 150ms;
+}
+.form-input:focus { border-color: var(--accent); }
+.form-input::placeholder { color: var(--text-4); }
+
+.form-hint { font-size: 11.5px; color: var(--text-3); line-height: 1.5; }
+
+.upload-footer {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border); border-top: none;
+  border-radius: 0 0 var(--r) var(--r);
+  background: var(--bg-subtle);
+}
+
+.upload-submit {
+  height: 32px; padding: 0 16px;
+  background: var(--accent); color: #fff;
+  border: none; border-radius: var(--r);
+  font-size: 13px; font-weight: 500; cursor: pointer;
+  transition: background 150ms;
+  flex-shrink: 0;
+}
+.upload-submit:hover { background: var(--accent-hover); }
+
+.progress-wrap { flex: 1; display: flex; align-items: center; gap: 10px; }
+.progress-track { flex: 1; height: 2px; background: var(--border-strong); border-radius: 1px; overflow: hidden; }
+.progress-fill { height: 100%; background: var(--accent); width: 0%; transition: width 80ms linear; border-radius: 1px; }
+.progress-text { font-size: 11px; font-family: var(--mono); color: var(--text-3); width: 32px; text-align: right; }
+
+/* ── Section header ─────────────────────────────────────────── */
+.section-header {
+  height: 40px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 16px;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: var(--r) var(--r) 0 0;
+  background: var(--bg-subtle);
+}
+.section-title { font-size: 12px; font-weight: 500; color: var(--text-2); display: flex; align-items: center; gap: 8px; }
+.file-count {
+  font-size: 11px; color: var(--text-3);
+  background: rgba(255,255,255,0.05); border: 1px solid var(--border);
+  border-radius: 4px; padding: 1px 6px; font-family: var(--mono);
+}
+.section-actions { display: flex; align-items: center; gap: 6px; }
+.sort-select {
+  height: 26px; padding: 0 8px;
+  background: transparent; border: 1px solid var(--border); border-radius: 4px;
+  color: var(--text-2); font-size: 11px; outline: none; cursor: pointer;
+  transition: border-color 150ms;
+}
+.sort-select:hover { border-color: var(--border-strong); }
+.sort-select option { background: #111; }
+
+/* ── File table ─────────────────────────────────────────────── */
+.file-table { border: 1px solid var(--border); border-radius: 0 0 var(--r) var(--r); overflow: hidden; }
+
+.file-table-head {
+  display: grid;
+  grid-template-columns: 24px 1fr 70px 52px 120px;
+  gap: 0 8px; padding: 0 12px 0 16px;
+  height: 32px; align-items: center;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-subtle);
+}
+.col-head { font-size: 11px; font-weight: 500; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.04em; }
+.col-head.r { text-align: right; }
+
+.file-row {
+  display: grid;
+  grid-template-columns: 24px 1fr 70px 52px 120px;
+  gap: 0 8px; padding: 0 12px 0 16px;
+  height: 48px; align-items: center;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  transition: background 150ms;
+}
+.file-row:last-child { border-bottom: none; }
+.file-row:hover { background: var(--bg-hover); }
+.file-row:hover .row-actions { opacity: 1; }
+
+.file-icon { font-size: 15px; display: flex; align-items: center; }
+
+.file-name-cell { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.file-name { font-size: 13.5px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: -0.01em; }
+
+.pw-badge {
+  font-size: 11px; flex-shrink: 0; opacity: 0.5;
+  background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.15);
+  border-radius: 3px; padding: 1px 4px; color: var(--warn);
+}
+
+.file-size { font-size: 12px; font-family: var(--mono); color: var(--text-2); text-align: right; }
+
+.file-expiry { font-size: 12px; font-family: var(--mono); text-align: right; }
+.exp-ok { color: var(--text-2); }
+.exp-warn { color: var(--warn); }
+.exp-urgent { color: var(--danger); }
+
+.row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 2px; opacity: 0; transition: opacity 150ms; }
+
+.icon-btn {
+  width: 32px; height: 32px;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; border: 1px solid transparent; border-radius: 5px;
+  font-size: 14px; cursor: pointer; color: var(--text-2); opacity: 0.6;
+  transition: all 150ms;
+}
+.icon-btn:hover { opacity: 1; border-color: var(--border-mid); background: rgba(255,255,255,0.05); color: var(--text); }
+.icon-btn.danger:hover { color: var(--danger); border-color: rgba(239,68,68,0.2); background: rgba(239,68,68,0.05); }
+
+/* ── Empty state ────────────────────────────────────────────── */
+.empty-state { padding: 48px 24px; text-align: center; }
+.empty-title { font-size: 14px; font-weight: 500; color: var(--text-2); margin-bottom: 4px; }
+.empty-sub { font-size: 13px; color: var(--text-3); }
+
+/* ── Deleted section ────────────────────────────────────────── */
+.deleted-wrap { margin-top: 24px; }
+.deleted-section {
+  border: 1px solid rgba(239,68,68,0.18);
+  border-radius: var(--r);
+  background: rgba(239,68,68,0.03);
+  overflow: hidden;
+}
+.deleted-section > summary {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px;
+  font-size: 13px; color: #f87171;
+  cursor: pointer; user-select: none; list-style: none;
+  transition: background 150ms;
+}
+.deleted-section > summary::-webkit-details-marker { display: none; }
+.deleted-section > summary:hover { background: rgba(239,68,68,0.04); }
+.deleted-section > summary::after { content: '›'; margin-left: auto; color: rgba(239,68,68,0.4); transition: transform 150ms; }
+.deleted-section[open] > summary::after { transform: rotate(90deg); }
+
+.deleted-list { border-top: 1px solid rgba(239,68,68,0.12); }
+.deleted-item {
+  display: flex; align-items: center;
+  padding: 10px 16px; gap: 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  font-size: 13px;
+}
+.deleted-item:last-child { border-bottom: none; }
+.deleted-item .d-name { flex: 1; color: var(--text-2); font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.deleted-item .d-reason { color: var(--danger); font-size: 12px; width: 130px; flex-shrink: 0; }
+.deleted-item .d-time { color: var(--text-3); font-size: 12px; font-family: var(--mono); width: 56px; text-align: right; flex-shrink: 0; }
+
+/* ── Modals ─────────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 500;
+  background: rgba(0,0,0,0.7);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  animation: fade-in 120ms ease;
+}
+.modal-overlay.hidden { display: none; }
+.modal-box {
+  background: #111; border: 1px solid var(--border-strong);
+  border-radius: 10px; width: 100%; max-width: 400px;
+  animation: modal-in 180ms cubic-bezier(0.16,1,0.3,1);
+  overflow: hidden;
+}
+.modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.modal-title { font-size: 14px; font-weight: 600; }
+.modal-close {
+  width: 28px; height: 28px;
+  background: transparent; border: none; border-radius: 4px;
+  color: var(--text-3); font-size: 16px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: color 150ms, background 150ms;
+}
+.modal-close:hover { color: var(--text); background: var(--bg-active); }
+.modal-body { padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+
+.setting-group { display: flex; flex-direction: column; gap: 8px; }
+.setting-label { font-size: 12px; font-weight: 500; color: var(--text-2); }
+.option-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.opt-btn {
+  height: 30px; padding: 0 12px;
+  background: transparent; border: 1px solid var(--border); border-radius: var(--r);
+  color: var(--text-2); font-size: 12.5px; cursor: pointer;
+  transition: all 150ms;
+}
+.opt-btn:hover { border-color: var(--border-strong); color: var(--text); }
+.opt-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.opt-btn.active-mono { background: var(--text); border-color: var(--text); color: var(--bg); }
+
+.toggle-row { display: flex; align-items: center; gap: 10px; }
+.toggle-row label { font-size: 13px; color: var(--text-2); cursor: pointer; user-select: none; }
+
+/* Password modal */
+.pw-error { font-size: 12px; color: var(--danger); display: none; }
+
+/* ── Toast ──────────────────────────────────────────────────── */
+.toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 900; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+.toast {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px;
+  background: #1a1a1a; border: 1px solid var(--border-strong);
+  border-radius: var(--r); font-size: 13px; color: var(--text);
+  min-width: 220px; max-width: 320px; cursor: pointer;
+  animation: toast-in 180ms ease both;
+}
+.toast.out { animation: toast-out 180ms ease both; }
+.toast-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+
+/* ── Keyframes ──────────────────────────────────────────────── */
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes modal-in { from { transform: scale(0.96) translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes toast-in { from { transform: translateX(12px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes toast-out { from { transform: none; opacity: 1; } to { transform: translateX(12px); opacity: 0; } }
+
+/* ── Footer ─────────────────────────────────────────────────── */
+footer {
+  border-top: 1px solid var(--border);
+  padding: 16px 24px;
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 12px;
+}
+.footer-text { font-size: 12px; color: var(--text-3); max-width: 440px; line-height: 1.6; }
+.footer-links { display: flex; gap: 16px; }
+.footer-link { font-size: 12px; color: var(--text-3); transition: color 150ms; }
+.footer-link:hover { color: var(--text-2); }
+
+/* ── Responsive ─────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  header { padding: 0 16px; gap: 10px; }
+  .search-wrap { max-width: 140px; }
+  main { padding: 20px 16px 48px; }
+  .file-table-head,
+  .file-row { grid-template-columns: 20px 1fr 60px 44px 100px; }
+  footer { flex-direction: column; align-items: flex-start; }
+}
+@media (max-width: 480px) {
+  .file-size { display: none; }
+  .file-table-head,
+  .file-row { grid-template-columns: 20px 1fr 52px 96px; }
+}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Header ──────────────────────────────────────────────── -->
+  <header>
+    <div class="logo">
+      <div class="logo-mark">Y</div>
+      <span class="logo-name">Yeet</span>
+    </div>
+    <div class="hdiv"></div>
+    <div class="search-wrap">
+      <span class="search-icon">⌕</span>
+      <input class="search-input" id="search-input" type="text" placeholder="Search files…" autocomplete="off" />
+    </div>
+    <div class="header-right">
+      <button class="btn-ghost" id="settings-btn" title="Settings" aria-label="Settings">⚙</button>
+      <button class="btn-primary" id="header-upload-btn">Upload</button>
+    </div>
+  </header>
+
+  <!-- ── Main ────────────────────────────────────────────────── -->
+  <main>
+
+    <!-- Upload form -->
+    <form class="upload-form" id="upload-form" novalidate>
+
+      <!-- Drop zone -->
+      <div class="drop-zone" id="drop-zone" tabindex="0" role="button" aria-label="Upload files">
+        <div class="drop-zone-icon">⬆</div>
+        <div class="drop-zone-title">Drop file here or <span style="color:var(--accent)">click to browse</span></div>
+        <div class="drop-zone-sub">Any file type · 2 GB max · Link expires after upload</div>
+      </div>
+      <input type="file" id="file-input" name="file" hidden multiple />
+
+      <!-- Password + bypass -->
+      <div class="form-extras">
+        <details id="pw-details">
+          <summary>🔒 Set password <span style="color:var(--text-3);margin-left:4px">(optional)</span></summary>
+          <div class="details-body">
+            <input class="form-input" type="password" name="password" id="pw-input" placeholder="Leave blank for no password" autocomplete="new-password" />
+            <span class="form-hint">⚠ Password protection provides basic privacy but is not end-to-end encrypted.</span>
+          </div>
+        </details>
+        <details id="bypass-details">
+          <summary>🎫 Bypass code <span style="color:var(--text-3);margin-left:4px">(optional)</span></summary>
+          <div class="details-body">
+            <input class="form-input" type="text" name="bypass_code" id="bypass-input" placeholder="12-character admin bypass code" maxlength="12" />
+            <span class="form-hint">Skips file size and rate limits. Obtain from the administrator.</span>
+          </div>
+        </details>
+      </div>
+
+      <!-- Footer row: submit + progress -->
+      <div class="upload-footer">
+        <button type="submit" class="upload-submit" id="upload-submit">Upload file</button>
+        <div class="progress-wrap" id="progress-wrap" style="display:none">
+          <div class="progress-track">
+            <div class="progress-fill" id="progress-fill"></div>
+          </div>
+          <span class="progress-text" id="progress-text">0%</span>
+        </div>
+        <span id="upload-filename" style="font-size:12px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1"></span>
+      </div>
+    </form>
+
+    <!-- File list -->
+    <div class="section-header">
+      <div class="section-title">
+        Recent uploads
+        <span class="file-count" id="file-count">0</span>
+      </div>
+      <div class="section-actions">
+        <select class="sort-select" id="sort-select">
+          <option value="recent">Newest first</option>
+          <option value="expiry">Expiring soon</option>
+          <option value="size">Largest first</option>
+          <option value="name">Name A–Z</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="file-table">
+      <div class="file-table-head">
+        <div></div>
+        <div class="col-head">Name</div>
+        <div class="col-head r">Size</div>
+        <div class="col-head r">Expiry</div>
+        <div class="col-head r">Actions</div>
+      </div>
+      <div id="file-list"></div>
+    </div>
+
+    <!-- Deleted files -->
+    <div class="deleted-wrap">
+      <details class="deleted-section" id="deleted-section">
+        <summary>⚠ Recently removed files (security log)</summary>
+        <div class="deleted-list" id="deleted-list"></div>
+      </details>
+    </div>
+
+  </main>
+
+  <!-- ── Footer ──────────────────────────────────────────────── -->
+  <footer>
+    <span class="footer-text">Files auto-delete after expiry. Uploading illegal, harmful, or abusive content is strictly prohibited. Yeet reserves the right to remove any file without notice.</span>
+    <div class="footer-links">
+      <a class="footer-link" href="#">Terms</a>
+      <a class="footer-link" href="#">Privacy</a>
+      <a class="footer-link" href="#">Abuse — abuse@yeet.fyi</a>
+    </div>
+  </footer>
+
+  <!-- ── Toast container ─────────────────────────────────────── -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- ── Settings modal ──────────────────────────────────────── -->
+  <div class="modal-overlay hidden" id="settings-modal" role="dialog" aria-modal="true" aria-label="Settings">
+    <div class="modal-box">
+      <div class="modal-header">
+        <span class="modal-title">Settings</span>
+        <button class="modal-close" id="settings-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="setting-group">
+          <div class="setting-label">Accent color</div>
+          <div class="option-row">
+            <button class="opt-btn active" data-setting="accent" data-value="blue">Blue</button>
+            <button class="opt-btn" data-setting="accent" data-value="mono">Monochrome</button>
+          </div>
+        </div>
+        <div class="setting-group">
+          <div class="setting-label">Default expiry</div>
+          <div class="option-row">
+            <button class="opt-btn" data-setting="expiry" data-value="24">24 hours</button>
+            <button class="opt-btn active" data-setting="expiry" data-value="72">72 hours</button>
+            <button class="opt-btn" data-setting="expiry" data-value="168">7 days</button>
+          </div>
+        </div>
+        <div class="setting-group">
+          <div class="setting-label">Display</div>
+          <div class="toggle-row">
+            <input type="checkbox" id="compact-toggle" />
+            <label for="compact-toggle">Compact list (36px rows)</label>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Password modal ──────────────────────────────────────── -->
+  <div class="modal-overlay hidden" id="pw-modal" role="dialog" aria-modal="true" aria-label="Enter password">
+    <div class="modal-box">
+      <div class="modal-header">
+        <span class="modal-title">🔒 Password required</span>
+        <button class="modal-close" id="pw-modal-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:13px;color:var(--text-2)">This file is password-protected. Enter the password to download.</p>
+        <input class="form-input" type="password" id="pw-modal-input" placeholder="Enter password" />
+        <span class="pw-error" id="pw-error">Incorrect password. Try again.</span>
+        <button class="upload-submit" id="pw-submit" style="align-self:flex-start">Unlock &amp; download</button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- #app -->
+
+<script>
+// ── Mock data ──────────────────────────────────────────────────────────────
+const FILE_ICONS = {
+  pdf:'📄', zip:'📦', gz:'📦', tar:'📦', rar:'📦', '7z':'📦',
+  png:'🖼️', jpg:'🖼️', jpeg:'🖼️', gif:'🖼️', webp:'🖼️', svg:'🖼️', avif:'🖼️',
+  mp4:'🎬', mov:'🎬', avi:'🎬', mkv:'🎬', webm:'🎬',
+  mp3:'🎵', wav:'🎵', flac:'🎵', aac:'🎵', ogg:'🎵',
+  doc:'📝', docx:'📝', txt:'📝', md:'📝', rtf:'📝',
+  xls:'📊', xlsx:'📊', csv:'📊',
+  psd:'🎨', ai:'🎨', fig:'🎨', sketch:'🎨',
+  js:'⚡', ts:'⚡', py:'⚡', sh:'⚡', rb:'⚡',
+  exe:'⚠️', dmg:'💿', iso:'💿',
+};
+function fileIcon(name) { return FILE_ICONS[name.split('.').pop().toLowerCase()] || '📄'; }
+
+function fmtSize(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
+  if (b < 1073741824) return (b/1048576).toFixed(1) + ' MB';
+  return (b/1073741824).toFixed(2) + ' GB';
+}
+function fmtRelative(ts) {
+  const d = Math.floor((Date.now()-ts)/1000);
+  if (d < 60) return 'just now';
+  if (d < 3600) return Math.floor(d/60) + 'm ago';
+  if (d < 86400) return Math.floor(d/3600) + 'h ago';
+  return Math.floor(d/86400) + 'd ago';
+}
+function fmtExpiry(exp) {
+  const ms = exp - Date.now();
+  if (ms <= 0) return { label: 'expired', cls: 'exp-urgent' };
+  const h = ms / 3600000;
+  const d = h / 24;
+  if (d >= 2) return { label: Math.floor(d) + 'd', cls: 'exp-ok' };
+  if (h >= 6)  return { label: Math.floor(h) + 'h', cls: 'exp-ok' };
+  if (h >= 1)  return { label: Math.floor(h) + 'h', cls: 'exp-warn' };
+  return { label: Math.floor(ms/60000) + 'm', cls: 'exp-urgent' };
+}
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+let FILES = [
+  { id:'abc123', name:'project-proposal.pdf',      size:2_380_000,  up: Date.now()-4*60000,        exp: Date.now()+23*3600000,  pw:false, own:true  },
+  { id:'def456', name:'confidential-data.zip',     size:15_700_000, up: Date.now()-2*3600000,       exp: Date.now()+12*3600000,  pw:true,  own:false },
+  { id:'ghi789', name:'vacation-photos.zip',       size:47_200_000, up: Date.now()-18*3600000,      exp: Date.now()+5*3600000,   pw:false, own:true  },
+  { id:'jkl012', name:'quarterly-report.xlsx',     size:890_000,    up: Date.now()-6*3600000,       exp: Date.now()+47*3600000,  pw:false, own:false },
+  { id:'mno345', name:'product-demo-final.mp4',    size:214_000_000,up: Date.now()-1*3600000,       exp: Date.now()+68*3600000,  pw:false, own:true  },
+  { id:'pqr678', name:'brand-assets-2026.zip',     size:62_000_000, up: Date.now()-30*60000,        exp: Date.now()+71*3600000,  pw:false, own:true  },
+  { id:'stu901', name:'server-config.sh',          size:14_200,     up: Date.now()-55*60000,        exp: Date.now()+44*3600000,  pw:true,  own:true  },
+  { id:'vwx234', name:'analytics-june.csv',        size:1_100_000,  up: Date.now()-9*3600000,       exp: Date.now()+2*3600000+30*60000, pw:false, own:false },
+  { id:'yza567', name:'soundtrack-rough-mix.mp3',  size:38_400_000, up: Date.now()-3*3600000,       exp: Date.now()+20*3600000,  pw:false, own:true  },
+  { id:'bcd890', name:'figma-handoff.fig',         size:22_300_000, up: Date.now()-7*3600000,       exp: Date.now()+64*3600000,  pw:false, own:true  },
+  { id:'efg123', name:'user-research-notes.docx',  size:1_200_000,  up: Date.now()-4*3600000,       exp: Date.now()+43*3600000,  pw:false, own:true  },
+  { id:'hij456', name:'deploy-rollback-v2.tar.gz', size:108_000_000,up: Date.now()-12*3600000,      exp: Date.now()+36*3600000,  pw:true,  own:false },
+];
+
+const DELETED = [
+  { name:'malware-dropper.exe', reason:'virus detected',      time:'2h ago' },
+  { name:'phishing-kit.html',   reason:'blocked extension',   time:'5h ago' },
+  { name:'spam-list.js',        reason:'blocked extension',   time:'1d ago' },
+  { name:'crack.zip',           reason:'DMCA takedown',       time:'2d ago' },
+];
+
+// ── State ──────────────────────────────────────────────────────────────────
+let state = {
+  search: '',
+  sort: 'recent',
+  accent: 'blue',
+  expiry: 72,
+  compact: false,
+  pendingDownloadId: null,
+};
+
+// ── DOM refs ───────────────────────────────────────────────────────────────
+const fileList       = document.getElementById('file-list');
+const fileCount      = document.getElementById('file-count');
+const searchInput    = document.getElementById('search-input');
+const sortSelect     = document.getElementById('sort-select');
+const dropZone       = document.getElementById('drop-zone');
+const fileInput      = document.getElementById('file-input');
+const uploadForm     = document.getElementById('upload-form');
+const progressWrap   = document.getElementById('progress-wrap');
+const progressFill   = document.getElementById('progress-fill');
+const progressText   = document.getElementById('progress-text');
+const uploadFilename = document.getElementById('upload-filename');
+const settingsBtn    = document.getElementById('settings-btn');
+const settingsModal  = document.getElementById('settings-modal');
+const settingsClose  = document.getElementById('settings-close');
+const pwModal        = document.getElementById('pw-modal');
+const pwModalClose   = document.getElementById('pw-modal-close');
+const pwModalInput   = document.getElementById('pw-modal-input');
+const pwSubmit       = document.getElementById('pw-submit');
+const pwError        = document.getElementById('pw-error');
+const deletedList    = document.getElementById('deleted-list');
+const toastContainer = document.getElementById('toast-container');
+const headerUpload   = document.getElementById('header-upload-btn');
+const compactToggle  = document.getElementById('compact-toggle');
+
+// ── Render ─────────────────────────────────────────────────────────────────
+function render() {
+  let list = FILES.filter(f =>
+    !state.search || f.name.toLowerCase().includes(state.search.toLowerCase())
+  );
+  list.sort((a,b) => {
+    if (state.sort === 'recent') return b.up - a.up;
+    if (state.sort === 'expiry') return a.exp - b.exp;
+    if (state.sort === 'size')   return b.size - a.size;
+    if (state.sort === 'name')   return a.name.localeCompare(b.name);
+    return 0;
+  });
+
+  fileCount.textContent = list.length;
+  const rowH = state.compact ? 36 : 48;
+
+  if (!list.length) {
+    fileList.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-title">${state.search ? `No results for "${esc(state.search)}"` : 'No files yet'}</div>
+        <div class="empty-sub">${state.search ? 'Try a different search term' : 'Upload a file above to get started'}</div>
+      </div>`;
+    return;
+  }
+
+  fileList.innerHTML = list.map(f => {
+    const { label, cls } = fmtExpiry(f.exp);
+    return `
+    <div class="file-row" data-id="${f.id}" style="height:${rowH}px">
+      <div class="file-icon">${f.pw ? '🔒' : fileIcon(f.name)}</div>
+      <div class="file-name-cell">
+        <span class="file-name">${esc(f.name)}</span>
+        ${f.pw ? `<span class="pw-badge">pw</span>` : ''}
+      </div>
+      <div class="file-size">${fmtSize(f.size)}</div>
+      <div class="file-expiry ${cls}">${label}</div>
+      <div class="row-actions">
+        <button class="icon-btn" data-action="preview" data-id="${f.id}" title="Preview">👁</button>
+        <button class="icon-btn" data-action="download" data-id="${f.id}" title="Download">⬇</button>
+        ${f.own ? `<button class="icon-btn danger" data-action="delete" data-id="${f.id}" title="Delete">🗑</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderDeleted() {
+  deletedList.innerHTML = DELETED.map(d => `
+    <div class="deleted-item">
+      <span class="d-name">${esc(d.name)}</span>
+      <span class="d-reason">${esc(d.reason)}</span>
+      <span class="d-time">${d.time}</span>
+    </div>`).join('');
+}
+
+// ── File list events ───────────────────────────────────────────────────────
+fileList.addEventListener('click', e => {
+  const btn = e.target.closest('[data-action]');
+  if (!btn) return;
+  const { action, id } = btn.dataset;
+  const f = FILES.find(x => x.id === id);
+  if (!f) return;
+
+  if (action === 'preview') {
+    toast(`Opening preview for ${f.name}`, 'info');
+  }
+  if (action === 'download') {
+    if (f.pw) {
+      state.pendingDownloadId = id;
+      pwModalInput.value = '';
+      pwError.style.display = 'none';
+      pwModal.classList.remove('hidden');
+      setTimeout(() => pwModalInput.focus(), 60);
+    } else {
+      toast(`Downloading ${f.name}…`, 'success');
+    }
+  }
+  if (action === 'delete') {
+    if (!confirm(`Delete "${f.name}" permanently?`)) return;
+    FILES = FILES.filter(x => x.id !== id);
+    render();
+    toast(`Deleted ${f.name}`, 'warn');
+  }
+});
+
+// ── Search & sort ──────────────────────────────────────────────────────────
+searchInput.addEventListener('input', e => { state.search = e.target.value; render(); });
+sortSelect.addEventListener('change', e => { state.sort = e.target.value; render(); });
+
+// ── Upload ─────────────────────────────────────────────────────────────────
+dropZone.addEventListener('click', () => fileInput.click());
+headerUpload.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('keydown', e => { if (e.key==='Enter'||e.key===' ') fileInput.click(); });
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', e => { if (!dropZone.contains(e.relatedTarget)) dropZone.classList.remove('drag-over'); });
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('drag-over');
+  if (e.dataTransfer.files.length) triggerUpload(Array.from(e.dataTransfer.files));
+});
+fileInput.addEventListener('change', e => {
+  if (e.target.files.length) triggerUpload(Array.from(e.target.files));
+  e.target.value = '';
+});
+uploadForm.addEventListener('submit', e => {
+  e.preventDefault();
+  if (!pendingFiles.length) { toast('Select a file first', 'warn'); return; }
+  startUpload();
+});
+
+let pendingFiles = [];
+function triggerUpload(files) {
+  pendingFiles = files;
+  uploadFilename.textContent = files.length === 1 ? files[0].name : `${files.length} files selected`;
+}
+
+function startUpload() {
+  const files = pendingFiles;
+  pendingFiles = [];
+  uploadFilename.textContent = '';
+  progressWrap.style.display = 'flex';
+  progressFill.style.width = '0%';
+  progressText.textContent = '0%';
+  toast(`Uploading ${files.length} file${files.length>1?'s':''}…`, 'info');
+
+  let pct = 0;
+  const speed = 0.7 + Math.random() * 1.3;
+  const iv = setInterval(() => {
+    pct = Math.min(100, pct + speed * (1 - pct/110));
+    const r = Math.round(pct);
+    progressFill.style.width = r + '%';
+    progressText.textContent = r + '%';
+    if (pct >= 100) {
+      clearInterval(iv);
+      setTimeout(() => {
+        progressWrap.style.display = 'none';
+        files.forEach(f => {
+          FILES.unshift({
+            id: Math.random().toString(36).slice(2),
+            name: f.name, size: f.size,
+            up: Date.now(), exp: Date.now() + state.expiry * 3600000,
+            pw: !!document.getElementById('pw-input').value,
+            own: true,
+          });
+        });
+        render();
+        toast(`${files.length > 1 ? files.length + ' files' : files[0].name} uploaded — link ready`, 'success');
+        document.getElementById('pw-input').value = '';
+        document.getElementById('bypass-input').value = '';
+      }, 300);
+    }
+  }, 40);
+}
+
+// ── Password modal ─────────────────────────────────────────────────────────
+pwModalClose.addEventListener('click', () => pwModal.classList.add('hidden'));
+pwModal.addEventListener('click', e => { if (e.target === pwModal) pwModal.classList.add('hidden'); });
+pwSubmit.addEventListener('click', () => {
+  const pw = pwModalInput.value.trim();
+  if (!pw) { pwError.textContent='Enter a password.'; pwError.style.display='block'; return; }
+  // Simulate: accept any non-empty password
+  pwModal.classList.add('hidden');
+  const f = FILES.find(x => x.id === state.pendingDownloadId);
+  toast(`Downloading ${f?.name || 'file'}…`, 'success');
+  state.pendingDownloadId = null;
+});
+pwModalInput.addEventListener('keydown', e => { if (e.key==='Enter') pwSubmit.click(); });
+
+// ── Settings modal ─────────────────────────────────────────────────────────
+settingsBtn.addEventListener('click', () => settingsModal.classList.remove('hidden'));
+settingsClose.addEventListener('click', () => settingsModal.classList.add('hidden'));
+settingsModal.addEventListener('click', e => { if (e.target === settingsModal) settingsModal.classList.add('hidden'); });
+
+document.querySelectorAll('[data-setting]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const { setting, value } = btn.dataset;
+    if (setting === 'accent') {
+      state.accent = value;
+      document.querySelectorAll('[data-setting="accent"]').forEach(b => b.classList.remove('active','active-mono'));
+      btn.classList.add(value === 'mono' ? 'active-mono' : 'active');
+      document.documentElement.style.setProperty('--accent', value === 'mono' ? '#fff' : '#3b82f6');
+      document.documentElement.style.setProperty('--accent-hover', value === 'mono' ? '#ccc' : '#2563eb');
+    }
+    if (setting === 'expiry') {
+      state.expiry = parseInt(value);
+      document.querySelectorAll('[data-setting="expiry"]').forEach(b => b.classList.remove('active','active-mono'));
+      btn.classList.add(state.accent === 'mono' ? 'active-mono' : 'active');
+    }
+  });
+});
+
+compactToggle.addEventListener('change', e => {
+  state.compact = e.target.checked;
+  render();
+});
+
+// ── Expiry refresh ─────────────────────────────────────────────────────────
+setInterval(() => {
+  document.querySelectorAll('.file-expiry').forEach(el => {
+    const id = el.closest('.file-row')?.dataset.id;
+    const f = FILES.find(x => x.id === id);
+    if (!f) return;
+    const { label, cls } = fmtExpiry(f.exp);
+    el.textContent = label;
+    el.className = `file-expiry ${cls}`;
+  });
+}, 30000);
+
+// ── Toast ──────────────────────────────────────────────────────────────────
+const TOAST_COLORS = { success:'#22c55e', error:'#ef4444', info:'#3b82f6', warn:'#f59e0b' };
+function toast(message, type='info') {
+  const id = 't'+Math.random().toString(36).slice(2);
+  const el = document.createElement('div');
+  el.className = 'toast'; el.id = id;
+  el.innerHTML = `<div class="toast-dot" style="background:${TOAST_COLORS[type]||TOAST_COLORS.info}"></div><span>${esc(message)}</span>`;
+  toastContainer.appendChild(el);
+  el.addEventListener('click', () => dismissToast(id));
+  setTimeout(() => dismissToast(id), 3800);
+}
+function dismissToast(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.add('out');
+  setTimeout(() => el.remove(), 200);
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────
+renderDeleted();
+render();
+</script>
+</body>
+</html>

@@ -1,49 +1,51 @@
 {% extends "base.html" %}
-{% block title %}yeet — download{% endblock %}
+{% block title %}{{ file.orig_name }} — Yeet{% endblock %}
+
 {% block content %}
-<div class="download-container">
-  {% if needs_password %}
-  <div class="file-card">
-    <div class="file-card-icon">🔒</div>
-    <div class="file-card-name">{{ file.orig_name }}</div>
-    <div class="file-card-meta">
-      {{ (file.file_size / 1048576) | round(2) }} MB
-      · expires {{ file.expires_at[:10] }}
+<div class="dl-page">
+
+  <div class="dl-card">
+    <div class="dl-card-icon">
+      {% if needs_password %}🔒
+      {% elif file.mime_type and file.mime_type.startswith('image/') %}🖼️
+      {% elif file.mime_type == 'application/pdf' %}📄
+      {% elif file.mime_type and file.mime_type.startswith('video/') %}🎬
+      {% elif file.mime_type and file.mime_type.startswith('audio/') %}🎵
+      {% else %}📄
+      {% endif %}
+    </div>
+    <div class="dl-card-name">{{ file.orig_name }}</div>
+    <div class="dl-card-meta">
+      {{ (file.file_size / 1048576) | round(2) }} MB &middot; {{ file.mime_type or 'unknown type' }}
+    </div>
+    <div class="dl-card-meta">
+      Expires {{ file.expires_at[:10] }}
+      {% if file.max_downloads %}
+        &middot; {{ file.download_count }} / {{ file.max_downloads }} downloads used
+      {% endif %}
     </div>
   </div>
 
-  {% if error %}
-  <div class="error-box">{{ error }}</div>
-  {% endif %}
+  {% if needs_password %}
 
-  <form method="POST" class="password-form">
-    <div class="field">
-      <label for="password">password required</label>
-      <input type="password" id="password" name="password" autofocus placeholder="enter password">
-    </div>
-    <button type="submit" class="btn-upload">unlock &amp; download</button>
-  </form>
+    {% if error %}
+    <div class="dl-error">{{ error }}</div>
+    {% endif %}
+
+    <form method="POST" class="dl-form">
+      <label class="dl-label" for="dl-password">Password required to download this file</label>
+      <input class="form-input" type="password" id="dl-password" name="password" autofocus placeholder="Enter password">
+      <button type="submit" class="upload-submit" style="align-self:flex-start">Unlock &amp; download</button>
+    </form>
 
   {% else %}
-  <div class="file-card">
-    <div class="file-card-icon">📄</div>
-    <div class="file-card-name">{{ file.orig_name }}</div>
-    <div class="file-card-meta">
-      {{ (file.file_size / 1048576) | round(2) }} MB
-      · {{ file.mime_type or "unknown type" }}
-      · expires {{ file.expires_at[:10] }}
-    </div>
-    {% if file.max_downloads %}
-    <div class="file-card-meta">
-      {{ file.download_count }} / {{ file.max_downloads }} downloads used
-    </div>
-    {% endif %}
-  </div>
 
-  <form method="POST">
-    <input type="hidden" name="password" value="">
-    <button type="submit" class="btn-upload">download</button>
-  </form>
+    <form method="POST" class="dl-form">
+      <input type="hidden" name="password" value="">
+      <button type="submit" class="upload-submit" style="align-self:flex-start">⬇ Download file</button>
+    </form>
+
   {% endif %}
+
 </div>
 {% endblock %}

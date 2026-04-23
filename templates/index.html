@@ -1,150 +1,94 @@
 {% extends "base.html" %}
-{% block title %}yeet — file transfer{% endblock %}
+{% block title %}Yeet — temporary file sharing{% endblock %}
 
 {% block content %}
 
-{% if storage_warning %}
-<div class="banner banner-warn" id="storageBanner">
-  {% if storage_blocked %}
-  ⛔ Storage limit reached — new uploads are disabled. Contact
-  <a href="mailto:info@majmohar.eu">info@majmohar.eu</a>
-  {% else %}
-  ⚠ Storage is {{ storage_pct }}% full. Uploads may be disabled soon.
-  {% endif %}
+<form class="upload-form" id="upload-form" novalidate>
+  <!-- Drop zone -->
+  <div class="drop-zone{% if storage_blocked %} disabled{% endif %}" id="drop-zone" tabindex="0" role="button" aria-label="Upload files">
+    <div class="drop-zone-icon">⬆</div>
+    <div class="drop-zone-title">
+      {% if storage_blocked %}
+        Uploads disabled — storage full
+      {% else %}
+        Drop file here or <span style="color:var(--accent)">click to browse</span>
+      {% endif %}
+    </div>
+    <div class="drop-zone-sub">{{ max_file_mb }}MB max &middot; expires after {{ expiry_hours }}h</div>
+  </div>
+  <input type="file" id="file-input" name="file" hidden>
+
+  <!-- Options -->
+  <div class="form-extras">
+    <details id="pw-details">
+      <summary>🔒 Password <span style="color:var(--text-3);margin-left:4px">(optional)</span></summary>
+      <div class="details-body">
+        <input class="form-input" type="password" name="password" id="pw-input" placeholder="Leave blank for a public link" autocomplete="new-password">
+        <span class="form-hint">⚠ Password protection provides basic privacy but does not encrypt the stored file.</span>
+      </div>
+    </details>
+    <details id="bypass-details">
+      <summary>🎫 Bypass code <span style="color:var(--text-3);margin-left:4px">(optional)</span></summary>
+      <div class="details-body">
+        <input class="form-input" type="text" name="bypass_code" id="bypass-input" placeholder="Admin bypass code — skips all limits" autocomplete="off" spellcheck="false">
+      </div>
+    </details>
+  </div>
+
+  <!-- Footer row: submit + progress + filename -->
+  <div class="upload-footer">
+    <button type="submit" class="upload-submit" id="upload-submit"{% if storage_blocked %} disabled{% endif %}>Upload file</button>
+    <div class="progress-wrap" id="progress-wrap" style="display:none">
+      <div class="progress-track">
+        <div class="progress-fill" id="progress-fill"></div>
+      </div>
+      <span class="progress-text" id="progress-text">0%</span>
+    </div>
+    <span class="upload-filename" id="upload-filename"></span>
+  </div>
+</form>
+
+<!-- Upload result -->
+<div class="upload-result hidden" id="upload-result">
+  <span class="upload-result-label">✓ link ready</span>
+  <span class="upload-result-url" id="upload-result-url"></span>
+  <button class="upload-result-copy" id="upload-result-copy" onclick="copyResult()">copy</button>
+  <button class="upload-result-dismiss" onclick="dismissResult()" title="Dismiss">×</button>
 </div>
-{% endif %}
 
-<div class="upload-container">
-
-  <!-- ── Drop zone ───────────────────────────────────────────────── -->
-  {% if not storage_blocked %}
-  <div class="drop-zone" id="dropZone">
-    <div class="drop-inner">
-      <div class="drop-icon">⬆</div>
-      <p class="drop-hint">drop file here</p>
-      <p class="drop-sub">or <label for="fileInput" class="file-label">click to browse</label></p>
-      <input type="file" id="fileInput" class="sr-only">
-    </div>
+<!-- File list -->
+<div class="section-header">
+  <div class="section-title">
+    Recent uploads
+    <span class="file-count" id="file-count">0</span>
   </div>
-  {% else %}
-  <div class="drop-zone drop-zone--disabled">
-    <div class="drop-inner">
-      <div class="drop-icon" style="opacity:.3">⛔</div>
-      <p class="drop-hint" style="opacity:.4">uploads disabled</p>
-    </div>
+  <div class="section-actions">
+    <select class="sort-select" id="sort-select">
+      <option value="recent">Newest first</option>
+      <option value="expiry">Expiring soon</option>
+      <option value="size">Largest first</option>
+      <option value="name">Name A–Z</option>
+    </select>
   </div>
-  {% endif %}
+</div>
 
-  <!-- ── Upload form ─────────────────────────────────────────────── -->
-  <form id="uploadForm" class="upload-form hidden">
-    <div class="file-info" id="fileInfo"></div>
-
-    <div class="field">
-      <label for="password">
-        password <span class="optional">(optional)</span>
-      </label>
-      <input type="password" id="password" name="password"
-             placeholder="leave blank for public link"
-             autocomplete="new-password">
-      <div class="field-warn hidden" id="passwordWarn">
-        ⚠ Password protection provides basic privacy but does not encrypt the stored file.
-      </div>
-    </div>
-
-    <div class="field">
-      <label for="maxDownloads">download limit <span class="optional">(optional)</span></label>
-      <input type="number" id="maxDownloads" name="max_downloads"
-             placeholder="unlimited" min="1" max="9999">
-    </div>
-
-    <div class="field">
-      <label for="bypassCode">bypass code <span class="optional">(optional — skips all limits)</span></label>
-      <input type="text" id="bypassCode" name="bypass_code"
-             placeholder="enter code if you have one"
-             autocomplete="off" spellcheck="false">
-    </div>
-
-    <button type="submit" class="btn-upload" id="submitBtn">
-      <span class="btn-text">yeet it</span>
-      <span class="btn-loading hidden">uploading…</span>
-    </button>
-  </form>
-
-  <!-- ── Result ──────────────────────────────────────────────────── -->
-  <div id="result" class="result hidden">
-    <div class="result-header">
-      <span class="result-ok">✓</span> link ready
-    </div>
-    <div class="result-url-wrap">
-      <input type="text" id="resultUrl" class="result-url" readonly>
-      <button class="btn-copy" id="copyBtn" onclick="copyLink()">copy</button>
-    </div>
-    <div class="result-meta" id="resultMeta"></div>
-    <div class="result-warning hidden" id="resultWarning"></div>
-    <button class="btn-reset" onclick="resetForm()">send another</button>
+<div class="file-table">
+  <div class="file-table-head">
+    <div></div>
+    <div class="col-head">Name</div>
+    <div class="col-head r">Size</div>
+    <div class="col-head r">Expiry</div>
+    <div class="col-head r">Actions</div>
   </div>
+  <div id="file-list"></div>
+</div>
 
-  <div id="errorBox" class="error-box hidden"></div>
-
-  <!-- ── Search / all uploads ──────────────────────────────────────── -->
-  <div class="section-divider"></div>
-
-  <div class="files-section">
-    <div class="files-header">
-      <div class="files-title-group">
-        <span class="files-title">recent uploads</span>
-        <span id="filesCount" class="files-count"></span>
-        <span class="live-dot" title="auto-refreshes every 30s"></span>
-      </div>
-      <div class="search-wrap">
-        <input type="text" id="searchInput" class="search-input"
-               placeholder="search…" oninput="filterFiles()">
-        <button class="btn-refresh" onclick="loadFileList()" title="Refresh">↻</button>
-      </div>
-    </div>
-
-    <div class="filter-row">
-      <select id="filterSize" onchange="filterFiles()" class="filter-select">
-        <option value="">any size</option>
-        <option value="small">&lt; 1 MB</option>
-        <option value="medium">1–10 MB</option>
-        <option value="large">&gt; 10 MB</option>
-      </select>
-      <select id="filterStatus" onchange="filterFiles()" class="filter-select">
-        <option value="">any status</option>
-        <option value="active">active</option>
-        <option value="expired">expired</option>
-      </select>
-    </div>
-
-    <div id="fileList" class="file-list">
-      <p class="file-list-empty">No uploads yet.</p>
-    </div>
-
-    <p class="files-public-note">All files are publicly visible · only you can delete your own</p>
-  </div>
-
-  <!-- ── Deleted files (virus scanner) ──────────────────────────── -->
-  <div class="section-divider"></div>
-
-  <details class="deleted-section" id="deletedSection">
-    <summary class="deleted-summary">
-      ⚠ Recently deleted files (security) — click to view
-    </summary>
-    <div class="deleted-list" id="deletedList">
-      <p class="file-list-empty">Loading…</p>
-    </div>
+<!-- Deleted / scanner log -->
+<div class="deleted-wrap">
+  <details class="deleted-section" id="deleted-section">
+    <summary>⚠ Recently removed files (security log)</summary>
+    <div class="deleted-list" id="deleted-list"></div>
   </details>
-
 </div>
-{% endblock %}
 
-{% block scripts %}
-<script>
-  window.YEET_CONFIG = {
-    maxFileMb: {{ max_file_mb|default(100) }},
-    expiryHours: {{ expiry_hours|default(24) }},
-  };
-</script>
-<script src="/static/js/app.js"></script>
 {% endblock %}

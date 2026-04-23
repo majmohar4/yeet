@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}yeet — {{ status }}{% endblock %}
+{% block title %}{{ status }} — Yeet{% endblock %}
 {% block content %}
 <div class="error-page">
   <div class="error-code">{{ status }}</div>
   <div class="error-message">{{ message }}</div>
-  <a href="/" class="btn-reset">go home</a>
+  <a href="/" class="error-back">← Back to Yeet</a>
 </div>
 {% endblock %}

@@ -68,7 +68,38 @@ app.include_router(admin.router)
 
 @app.get("/health")
 async def health():
-    return JSONResponse({"status": "ok", "version": settings.APP_VERSION})
+    from app.services.storage import get_total_storage
+    from app.services.config_manager import get_storage_limit
+    from app.database import get_db as _get_db
+    from datetime import datetime, timezone
+
+    total = get_total_storage()
+    limit = get_storage_limit()
+    db = await _get_db()
+    now = datetime.now(timezone.utc).isoformat()
+    async with db.execute(
+        "SELECT COUNT(*) FROM files WHERE archived_at IS NULL AND expires_at > ?", (now,)
+    ) as cur:
+        active_files = (await cur.fetchone())[0]
+    async with db.execute(
+        "SELECT COUNT(*) FROM files WHERE archived_at IS NOT NULL"
+    ) as cur:
+        archived_files = (await cur.fetchone())[0]
+
+    return JSONResponse({
+        "status": "ok",
+        "version": settings.APP_VERSION,
+        "storage": {
+            "used_bytes": total,
+            "used_gb": round(total / 1_073_741_824, 3),
+            "limit_gb": round(limit / 1_073_741_824, 1),
+            "usage_pct": round(total / limit * 100, 1) if limit else 0,
+        },
+        "files": {
+            "active": active_files,
+            "archived": archived_files,
+        },
+    })
 
 
 @app.exception_handler(404)

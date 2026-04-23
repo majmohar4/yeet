@@ -1,0 +1,366 @@
+yeet  | [yeet] Updating ClamAV virus definitions (may take ~2 min on first run)...
+yeet  | [yeet] Starting clamd...
+yeet  | [yeet] Waiting for clamd to accept connections...
+yeet  | [yeet] clamd ready.
+yeet  | [yeet] Starting FastAPI app...
+yeet  | INFO:     Started server process [1]
+yeet  | INFO:     Waiting for application startup.
+yeet  | 2026-04-23 23:16:14,666 INFO yeet — yeet 1.0.0 started
+yeet  | INFO:     Application startup complete.
+yeet  | INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+yeet  | 2026-04-23 23:16:14,671 INFO yeet.cleanup — cleanup done: archived=0 deleted=0
+yeet  | INFO:     172.18.0.1:59986 - "GET /health HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "GET /health HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "GET /health HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "GET / HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "GET / HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "GET / HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "GET / HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "GET / HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "GET / HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "GET / HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "GET / HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "GET / HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "GET /f/1942ccfd2d724731b8bd65136b9e7a07 HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 413 Request Entity Too Large
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 422 Unprocessable Entity
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 422 Unprocessable Entity
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "GET /f/9495550b226f47fb85856cdd429c261f HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /f/bcdc47d3f14e4e2a8806adedc74cc896 HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /f/3068b97275284b1798d7c1a28b59de74 HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "GET /admin HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /f/138b1d6cbafe40769ce786e76ae31374 HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /f/41a85d436c494793a86edf25cbc2dab4 HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "POST /f/41a85d436c494793a86edf25cbc2dab4 HTTP/1.1" 410 Gone
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "GET /f/099e4eeb8e2445c296ecd3ba46cba3f6 HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /f/45a195d710a348309d358a8e4b834a7f HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /f/3967e52112144fb9b60f1d05fe96c143 HTTP/1.1" 403 Forbidden
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /f/4eb19647effc47cd9da91307c8df8482 HTTP/1.1" 403 Forbidden
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "GET /f/0a54c3b90c4d4021b1cce804172d1bd5 HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     127.0.0.1:58142 - "GET /health HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "GET /f/e95273a0de7648cc845d46547a31daaa HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "GET /etc/passwd HTTP/1.1" 404 Not Found
+yeet  | INFO:     172.18.0.1:59992 - "GET /f/../etc/passwd HTTP/1.1" 404 Not Found
+yeet  | INFO:     172.18.0.1:59992 - "GET /f/....//etc/passwd HTTP/1.1" 404 Not Found
+yeet  | INFO:     172.18.0.1:59992 - "GET /etc/passwd HTTP/1.1" 404 Not Found
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "GET /f/3ae40a0c4f914b938a5f6ac53462c394 HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "GET /f/%27%20OR%20%271%27%3D%271 HTTP/1.1" 404 Not Found
+yeet  | INFO:     172.18.0.1:59992 - "GET /f/1%3B%20DROP%20TABLE%20files%3B-- HTTP/1.1" 404 Not Found
+yeet  | INFO:     172.18.0.1:59992 - "GET /f/%27%20UNION%20SELECT%20%2A%20FROM%20files-- HTTP/1.1" 404 Not Found
+yeet  | INFO:     172.18.0.1:59992 - "GET /f/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa HTTP/1.1" 404 Not Found
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "GET /f/c8d41f9fa2ef447e9d2ab0afe9c1cbeb HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "GET /f/32ba94f6a63f44ca95d9fd5ace2c3e7f HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 400 Bad Request
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "GET /f/376a5d65022b43cd85dd9b022e52f4c4 HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     10.0.0.1:0 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     10.0.0.2:0 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "GET /f/00000000000000000000000000000000 HTTP/1.1" 404 Not Found
+yeet  | INFO:     172.18.0.1:59992 - "GET /f/00000000000000000000000000000000 HTTP/1.1" 404 Not Found
+yeet  | INFO:     172.18.0.1:59992 - "GET /f/notahexid HTTP/1.1" 404 Not Found
+yeet  | INFO:     172.18.0.1:59992 - "GET /this-does-not-exist-xyz HTTP/1.1" 404 Not Found
+yeet  | INFO:     172.18.0.1:59992 - "GET /admin HTTP/1.1" 401 Unauthorized
+yeet  | INFO:     172.18.0.1:59992 - "GET /admin HTTP/1.1" 401 Unauthorized
+yeet  | INFO:     172.18.0.1:59992 - "GET /admin HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "DELETE /admin/files/a1259b348c5f4252a6bfd6172fc12c05 HTTP/1.1" 401 Unauthorized
+yeet  | INFO:     172.18.0.1:59992 - "GET /admin/logs HTTP/1.1" 401 Unauthorized
+yeet  | INFO:     172.18.0.1:59992 - "POST /admin/cleanup HTTP/1.1" 401 Unauthorized
+yeet  | INFO:     172.18.0.1:59992 - "DELETE /admin/files/00000000000000000000000000000000 HTTP/1.1" 404 Not Found
+yeet  | INFO:     172.18.0.1:59992 - "GET /admin/logs?limit=5 HTTP/1.1" 200 OK
+yeet  | 2026-04-23 23:16:19,037 INFO yeet.cleanup — cleanup done: archived=0 deleted=0
+yeet  | INFO:     172.18.0.1:59992 - "POST /admin/cleanup HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /f/11c535f0dd5d498a9485d9565ab76408 HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 400 Bad Request
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "DELETE /upload HTTP/1.1" 405 Method Not Allowed
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /f/340cbf1f46864b75b7e09a7e72506688 HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "GET / HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "GET /admin/codes HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "GET /admin/codes HTTP/1.1" 401 Unauthorized
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "DELETE /admin/codes/TESTCODE HTTP/1.1" 401 Unauthorized
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "GET / HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 413 Request Entity Too Large
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | 2026-04-23 23:16:20,683 INFO yeet.cleanup — cleanup done: archived=0 deleted=0
+yeet  | INFO:     172.18.0.1:59992 - "POST /admin/cleanup HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "GET /api/files?ids= HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "GET /api/files?ids=fba6c409c3714b6cbe8eed9ede409751 HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "GET /api/files?ids=../../etc/passwd,invalid HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 201 Created
+yeet  | INFO:     172.18.0.1:59992 - "GET /api/files?ids=a2ff2d7e20d841d5a65f3327aca07620,cca792b14bad4db9b6be9cb8413ec10e,1e5012f6296f4080886d664669e0e94e HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "GET /api/virus-log HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "GET /api/virus-log HTTP/1.1" 200 OK
+yeet  | INFO:     172.18.0.1:59992 - "GET /api/virus-log HTTP/1.1" 200 OK
+yeet  | 2026-04-23 23:16:20,732 WARNING yeet.upload — virus detected: ip=172.18.0.1 file=eicar.txt threat=Eicar-Test-Signature
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 422 Unprocessable Entity
+yeet  | 2026-04-23 23:16:20,737 WARNING yeet.upload — virus detected: ip=172.18.0.1 file=eicar_audit_test.txt threat=Eicar-Test-Signature
+yeet  | INFO:     172.18.0.1:59992 - "POST /upload HTTP/1.1" 422 Unprocessable Entity

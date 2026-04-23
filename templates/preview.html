@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}{{ file.orig_name }} — Preview — Yeet{% endblock %}
+
+{% block content %}
+<div class="preview-page">
+
+  <div class="preview-header">
+    <div class="preview-header-name">{{ file.orig_name }}</div>
+    <div class="preview-header-meta">{{ (file.file_size / 1048576) | round(2) }} MB</div>
+    <a href="/f/{{ file.id }}" class="preview-dl-btn">⬇ Download</a>
+  </div>
+
+  <div class="preview-container">
+    {% if preview_type == 'image' %}
+      <img src="/raw/{{ file.id }}" alt="{{ file.orig_name }}">
+    {% elif preview_type == 'pdf' %}
+      <embed src="/raw/{{ file.id }}" type="application/pdf">
+    {% else %}
+      <div class="preview-unavailable">
+        Preview not available for this file type. Use the Download button above.
+      </div>
+    {% endif %}
+  </div>
+
+</div>
+{% endblock %}

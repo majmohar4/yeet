@@ -3,29 +3,108 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{% block title %}yeet{% endblock %}</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <title>{% block title %}Yeet{% endblock %}</title>
   <link rel="stylesheet" href="/static/css/style.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📤</text></svg>">
 </head>
 <body>
-  <div class="scanlines"></div>
+<div id="app">
+
+  {% if storage_warning is defined and storage_warning %}
+  <div class="storage-banner {% if storage_blocked %}blocked{% else %}warn{% endif %}">
+    {% if storage_blocked %}
+      ⛔ Storage limit reached — uploads disabled. Contact <a href="mailto:info@majmohar.eu">info@majmohar.eu</a>
+    {% else %}
+      ⚠ Storage {{ storage_pct }}% full — uploads may be disabled soon.
+    {% endif %}
+  </div>
+  {% endif %}
+
   <header>
     <a href="/" class="logo">
-      <span class="logo-bracket">[</span>yeet<span class="logo-bracket">]</span>
+      <div class="logo-mark">Y</div>
+      <span class="logo-name">Yeet</span>
     </a>
-    <span class="tagline">drop files. share links. done.</span>
+    <div class="hdiv"></div>
+    <div class="header-search-wrap">
+      <span class="header-search-icon">⌕</span>
+      <input class="header-search-input" id="search-input" type="text" placeholder="Search files…" autocomplete="off">
+    </div>
+    <div class="header-right">
+      <button class="btn-ghost" id="settings-btn" title="Settings">⚙</button>
+      <a href="/" class="btn-primary">Upload</a>
+    </div>
   </header>
+
   <main>
     {% block content %}{% endblock %}
   </main>
+
   <footer>
-    <span>files expire in {{ expiry_hours|default(24) }}h · max {{ max_file_mb|default(100) }}MB</span>
-    <span class="footer-sep">·</span>
-    <a href="https://github.com/majmohar4/yeet" target="_blank" rel="noopener">source</a>
+    <span class="footer-text">
+      Files auto-delete after {{ expiry_hours|default(24) }}h &middot; max {{ max_file_mb|default(100) }}MB &middot;
+      No illegal content. Uploading harmful or abusive files is strictly prohibited.
+    </span>
+    <div class="footer-links">
+      <a class="footer-link" href="mailto:info@majmohar.eu">Abuse: info@majmohar.eu</a>
+    </div>
   </footer>
-  {% block scripts %}{% endblock %}
+
+  <!-- Toast container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- Settings modal -->
+  <div class="modal-overlay hidden" id="settings-modal" role="dialog" aria-modal="true">
+    <div class="modal-box">
+      <div class="modal-header">
+        <span class="modal-title">Settings</span>
+        <button class="modal-close" id="settings-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="setting-group">
+          <div class="setting-label">Accent color</div>
+          <div class="option-row">
+            <button class="opt-btn active" data-setting="accent" data-value="blue">Blue</button>
+            <button class="opt-btn" data-setting="accent" data-value="mono">Mono</button>
+          </div>
+        </div>
+        <div class="setting-group">
+          <div class="setting-label">Display</div>
+          <div class="toggle-row">
+            <input type="checkbox" id="compact-toggle">
+            <label for="compact-toggle">Compact list rows</label>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Password modal -->
+  <div class="modal-overlay hidden" id="pw-modal" role="dialog" aria-modal="true">
+    <div class="modal-box">
+      <div class="modal-header">
+        <span class="modal-title">🔒 Password required</span>
+        <button class="modal-close" id="pw-modal-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:13px;color:var(--text-2)">This file is password-protected. Enter the password to download.</p>
+        <input class="form-input" type="password" id="pw-modal-input" placeholder="Enter password">
+        <span class="pw-error" id="pw-error"></span>
+        <button class="upload-submit" id="pw-submit">Unlock &amp; download</button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- #app -->
+
+<script>
+window.YEET_CONFIG = {
+  maxFileMb: {{ max_file_mb|default(100) }},
+  expiryHours: {{ expiry_hours|default(24) }},
+  storageBlocked: {{ 'true' if storage_blocked else 'false' }},
+};
+</script>
+{% block scripts %}{% endblock %}
+<script src="/static/js/app.js"></script>
 </body>
 </html>

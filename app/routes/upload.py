@@ -26,6 +26,42 @@ logger = logging.getLogger("yeet.upload")
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
 
+ALLOWED_EXTENSIONS = {
+    # Images
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".ico", ".avif",
+    # Documents
+    ".pdf", ".txt", ".md", ".doc", ".docx", ".odt", ".rtf",
+    # Spreadsheets
+    ".xls", ".xlsx", ".csv", ".ods",
+    # Presentations
+    ".ppt", ".pptx", ".odp",
+    # Archives
+    ".zip", ".tar", ".gz", ".7z", ".rar", ".bz2", ".xz",
+    # Video
+    ".mp4", ".mov", ".avi", ".mkv", ".webm",
+    # Audio
+    ".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac",
+    # Data / config
+    ".json", ".xml", ".yaml", ".yml", ".toml",
+    # Source code (safe to share, not executed server-side)
+    ".py", ".java", ".cpp", ".c", ".rs", ".go", ".ts", ".css", ".sql",
+    ".rb", ".php", ".swift", ".kt",
+}
+
+
+def _check_extension(filename: str) -> str | None:
+    """Return error string if extension is not allowed, else None."""
+    if "." not in filename:
+        return "Files without an extension are not allowed. Add an extension or pack it into a .zip archive."
+    ext = "." + filename.rsplit(".", 1)[-1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        return (
+            f"Extension '{ext}' is not allowed. "
+            "Supported: images, documents, archives, media, data files. "
+            "Unusual files? Pack them into a .zip archive."
+        )
+    return None
+
 
 @router.get("/")
 async def index(request: Request):
@@ -53,9 +89,17 @@ async def upload_file(
     max_downloads: str = Form(default=""),
     bypass_code: str = Form(default=""),
     session_id: str = Form(default=""),
+    website: str = Form(default=""),  # honeypot
 ):
     ip = _client_ip(request)
     ua = request.headers.get("user-agent", "")
+
+    # Honeypot: real browsers leave this blank
+    if website:
+        logger.warning("honeypot triggered: ip=%s", ip)
+        await _audit(ip, ua, "bot_rejected", None, f"honeypot={website[:32]}")
+        return JSONResponse({"error": "Invalid request."}, status_code=400)
+
     max_file = get_max_file_size()
     storage_limit = get_storage_limit()
 
@@ -126,6 +170,11 @@ async def _do_upload(
                 status_code=429,
                 headers={"Retry-After": str(int(hrs * 3600))},
             )
+
+    # ── Extension whitelist ───────────────────────────────────────────────────
+    ext_error = _check_extension(file.filename or "")
+    if ext_error:
+        return JSONResponse({"error": ext_error}, status_code=400)
 
     # ── Virus scan ────────────────────────────────────────────────────────────
     scan_status, threat = virus_scan.scan_bytes(data)

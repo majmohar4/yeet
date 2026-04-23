@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-04-24T01:16:20.857880",
+  "duration_seconds": 14.9,
+  "summary": {
+    "total": 1,
+    "passed": 1,
+    "failed": 0
+  },
+  "suites": {
+    "Security & Functional": "PASS"
+  }
+}

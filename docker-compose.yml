@@ -18,6 +18,8 @@ services:
       - yeet_data:/data            # uploads, archive, SQLite DB, config.json, ClamAV definitions
     env_file:
       - .env                       # SECRET_KEY, ADMIN_PASSWORD, overrides
+    environment:
+      - ADMIN_PASSWORD             # pass-through from host shell (used by test runner)
     deploy:
       resources:
         limits:
@@ -27,7 +29,7 @@ services:
           memory: 256M
     healthcheck:
       test: ["CMD", "python", "-c",
-             "import urllib.request; urllib.request.urlopen('http://localhost:4534/health')"]
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
       timeout: 5s
       retries: 5
