@@ -15,7 +15,8 @@ services:
     ports:
       - "127.0.0.1:4534:8000"     # bind localhost only — expose via reverse proxy
     volumes:
-      - yeet_data:/data            # uploads, archive, SQLite DB, config.json, ClamAV definitions
+      - ./config:/app/config              # Local config
+      - /home/home/Video/Yeet:/data       # Files on same disk as Video
     env_file:
       - .env                       # SECRET_KEY, ADMIN_PASSWORD, overrides
     environment:

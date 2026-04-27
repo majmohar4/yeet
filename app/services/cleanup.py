@@ -2,8 +2,11 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
+from app.config import settings
 from app.database import get_db
 from app.services.storage import archive_file, delete_file
+
+CLIPBOARD_DIR = settings.BASE_DIR / "clipboard"
 
 logger = logging.getLogger("yeet.cleanup")
 
@@ -66,8 +69,27 @@ async def run_cleanup() -> dict:
         "DELETE FROM audit_log WHERE ts < datetime('now', '-90 days')"
     )
 
+    # Delete expired (non-pinned) clipboard items
+    async with db.execute(
+        "SELECT id, type, content FROM clipboard_items WHERE pinned=0 AND expires_at <= ?",
+        (now,),
+    ) as cursor:
+        expired_clips = [(row[0], row[1], row[2]) for row in await cursor.fetchall()]
+
+    for cid, ctype, ccontent in expired_clips:
+        if ctype == "image":
+            img_path = CLIPBOARD_DIR / ccontent
+            if img_path.exists():
+                try:
+                    img_path.unlink()
+                except Exception:
+                    pass
+        await db.execute("DELETE FROM clipboard_items WHERE id=?", (cid,))
+        logger.info("deleted clipboard item %s", cid)
+
     await db.commit()
-    logger.info("cleanup done: archived=%d deleted=%d", archived, deleted)
+    logger.info("cleanup done: archived=%d deleted=%d clipboard_deleted=%d",
+                archived, deleted, len(expired_clips))
     return {"archived": archived, "deleted": deleted, "expired_ids": expired}
 
 

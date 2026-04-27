@@ -5,9 +5,10 @@ const SESSION_KEY = 'yeet_session';
 function getSession() {
   let s = localStorage.getItem(SESSION_KEY);
   if (!s) {
-    s = crypto.randomUUID ? crypto.randomUUID() :
-      ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
-        (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+    s = crypto.randomUUID
+      ? crypto.randomUUID()
+      : ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
+          (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
     localStorage.setItem(SESSION_KEY, s);
   }
   return s;
@@ -15,144 +16,317 @@ function getSession() {
 getSession();
 
 // ── State ─────────────────────────────────────────────────────────────────────
-let _allFiles = [];
-let _compact = localStorage.getItem('yeet_compact') === '1';
-let _accent = localStorage.getItem('yeet_accent') || 'blue';
-let _pendingDlId = null;
-let _resultUrl = '';
+const _cfg         = window.YEET_CONFIG || {};
+let   _allFiles    = [];
+let   _accent      = localStorage.getItem('yeet_accent') || 'cyan';
+let   _expiry      = parseInt(localStorage.getItem('yeet_expiry') || '24', 10);
+let   _pendingDlId = null;
+let   _resultUrl   = '';
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
-const dropZone      = document.getElementById('drop-zone');
-const fileInput     = document.getElementById('file-input');
-const uploadForm    = document.getElementById('upload-form');
-const uploadSubmit  = document.getElementById('upload-submit');
-const progressWrap  = document.getElementById('progress-wrap');
-const progressFill  = document.getElementById('progress-fill');
-const progressText  = document.getElementById('progress-text');
-const uploadFilename= document.getElementById('upload-filename');
-const uploadResult  = document.getElementById('upload-result');
-const resultUrlEl   = document.getElementById('upload-result-url');
-const sortSelect    = document.getElementById('sort-select');
-const searchInput   = document.getElementById('search-input');
-const fileList      = document.getElementById('file-list');
-const fileCount     = document.getElementById('file-count');
-const deletedSection= document.getElementById('deleted-section');
-const deletedList   = document.getElementById('deleted-list');
-const settingsBtn   = document.getElementById('settings-btn');
-const settingsModal = document.getElementById('settings-modal');
-const settingsClose = document.getElementById('settings-close');
-const compactToggle = document.getElementById('compact-toggle');
-const pwModal       = document.getElementById('pw-modal');
-const pwModalClose  = document.getElementById('pw-modal-close');
-const pwModalInput  = document.getElementById('pw-modal-input');
-const pwSubmit      = document.getElementById('pw-submit');
-const pwError       = document.getElementById('pw-error');
-const toastContainer= document.getElementById('toast-container');
+const dropZone       = document.getElementById('drop-zone');
+const dzPrompt       = document.getElementById('dz-prompt');
+const fileInput      = document.getElementById('file-input');
+const dzPassword     = document.getElementById('dz-password');
+const dzGenPw        = document.getElementById('dz-gen-pw');
+const activeUploads  = document.getElementById('active-uploads');
+const uploadResult   = document.getElementById('upload-result');
+const resultUrlEl    = document.getElementById('upload-result-url');
+const fileGrid       = document.getElementById('file-grid');
+const fileCount      = document.getElementById('file-count');
+const searchInput    = document.getElementById('search-input');
+const sortSelect     = document.getElementById('sort-select');
+const deletedSection = document.getElementById('deleted-section');
+const deletedList    = document.getElementById('deleted-list');
+const settingsBtn    = document.getElementById('settings-btn');
+const settingsModal  = document.getElementById('settings-modal');
+const settingsClose  = document.getElementById('settings-close');
+const pwModal        = document.getElementById('pw-modal');
+const pwModalClose   = document.getElementById('pw-modal-close');
+const pwModalInput   = document.getElementById('pw-modal-input');
+const pwSubmit       = document.getElementById('pw-submit');
+const pwError        = document.getElementById('pw-error');
+const toastContainer = document.getElementById('toast-container');
+const fabBtn         = document.getElementById('fab-btn');
 
-// ── Init settings ─────────────────────────────────────────────────────────────
-(function initSettings() {
-  if (_compact && compactToggle) compactToggle.checked = true;
-  if (_accent === 'mono') applyAccent('mono');
+// ── Accent / settings init ────────────────────────────────────────────────────
+applyAccent(_accent);
+(function syncAccentButtons() {
   document.querySelectorAll('[data-setting="accent"]').forEach(b => {
-    b.classList.toggle('active', b.dataset.value === _accent && _accent === 'blue');
-    b.classList.toggle('active-mono', b.dataset.value === _accent && _accent === 'mono');
+    b.classList.remove('active', 'active-mono');
+    if (b.dataset.value === _accent) {
+      b.classList.add(_accent === 'mono' ? 'active-mono' : 'active');
+    }
   });
 })();
 
 function applyAccent(val) {
-  if (val === 'mono') {
-    document.documentElement.style.setProperty('--accent', '#fff');
-    document.documentElement.style.setProperty('--accent-hover', '#ccc');
-  } else {
-    document.documentElement.style.setProperty('--accent', '#3b82f6');
-    document.documentElement.style.setProperty('--accent-hover', '#2563eb');
+  const map = {
+    cyan:   ['#00D4FF', '#00AACC'],
+    purple: ['#B537F2', '#8E1ED4'],
+    mono:   ['#FFFFFF', '#CCCCCC'],
+  };
+  const [a, h] = map[val] || map.cyan;
+  document.documentElement.style.setProperty('--accent', a);
+  document.documentElement.style.setProperty('--accent-hover', h);
+}
+
+// ── Expiry chips ──────────────────────────────────────────────────────────────
+(function initChips() {
+  const maxH = _cfg.expiryHours || 24;
+
+  // Cap stored preference at server max
+  if (_expiry > maxH) { _expiry = maxH; localStorage.setItem('yeet_expiry', String(_expiry)); }
+
+  let anyVisible = false;
+  document.querySelectorAll('.chip[data-hours]').forEach(btn => {
+    const h = parseInt(btn.dataset.hours, 10);
+    if (h > maxH) { btn.style.display = 'none'; return; }
+    anyVisible = true;
+    if (h === _expiry) btn.classList.add('active');
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      document.querySelectorAll('.chip[data-hours]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      _expiry = h;
+      localStorage.setItem('yeet_expiry', String(_expiry));
+    });
+  });
+
+  // Activate the largest visible chip if none match saved preference
+  if (!document.querySelector('.chip.active')) {
+    const chips = [...document.querySelectorAll('.chip[data-hours]')].filter(b => b.style.display !== 'none');
+    const best  = chips.reduce((a, b) => parseInt(b.dataset.hours,10) > parseInt(a.dataset.hours,10) ? b : a, chips[0] || null);
+    if (best) { best.classList.add('active'); _expiry = parseInt(best.dataset.hours, 10); }
+  }
+})();
+
+// ── Password generator ────────────────────────────────────────────────────────
+if (dzGenPw) {
+  dzGenPw.addEventListener('click', e => {
+    e.stopPropagation();
+    const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789!@#$%&';
+    const arr = crypto.getRandomValues(new Uint8Array(14));
+    const pw = Array.from(arr, b => chars[b % chars.length]).join('');
+    if (dzPassword) { dzPassword.value = pw; dzPassword.type = 'text'; setTimeout(() => { dzPassword.type = 'password'; }, 2500); }
+    navigator.clipboard.writeText(pw).catch(() => {});
+    toast('Password generated & copied', 'success');
+  });
+}
+
+// ── Drop zone interactions ────────────────────────────────────────────────────
+if (dropZone) {
+  // Click to browse — ignore clicks on controls
+  dropZone.addEventListener('click', e => {
+    if (e.target.closest('#dz-controls')) return;
+    fileInput && fileInput.click();
+  });
+  dropZone.addEventListener('keydown', e => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target === dropZone) fileInput && fileInput.click();
+  });
+
+  // Drag
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+  dropZone.addEventListener('dragleave', e => { if (!dropZone.contains(e.relatedTarget)) dropZone.classList.remove('drag-over'); });
+  dropZone.addEventListener('drop', async e => {
+    e.preventDefault(); dropZone.classList.remove('drag-over');
+
+    const files = [];
+    let hadFolder = false;
+    if (e.dataTransfer.items) {
+      for (const item of Array.from(e.dataTransfer.items)) {
+        if (item.kind !== 'file') continue;
+        const entry = typeof item.webkitGetAsEntry === 'function' ? item.webkitGetAsEntry() : null;
+        if (entry && entry.isDirectory) { hadFolder = true; continue; }
+        const f = item.getAsFile();
+        if (!f) continue;
+        if (!entry && !(await _probeReadable(f))) { hadFolder = true; continue; }
+        files.push(f);
+      }
+    } else {
+      for (const f of Array.from(e.dataTransfer.files)) {
+        if (!(await _probeReadable(f))) { hadFolder = true; continue; }
+        files.push(f);
+      }
+    }
+    if (hadFolder) toast('Folder upload is not supported — drop individual files', 'warn');
+    if (files.length) await uploadFiles(files);
+  });
+}
+
+if (fileInput) {
+  fileInput.addEventListener('change', async () => {
+    const files = Array.from(fileInput.files);
+    fileInput.value = '';
+    if (files.length) await uploadFiles(files);
+  });
+}
+
+if (fabBtn) fabBtn.addEventListener('click', () => fileInput && fileInput.click());
+
+// ── Global paste detection ────────────────────────────────────────────────────
+document.addEventListener('paste', async e => {
+  if (!dropZone) return;
+  const active = document.activeElement;
+  if (active && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName)) return;
+
+  e.preventDefault();
+  const items = Array.from(e.clipboardData.items);
+
+  // Image → upload as file
+  const imgItem = items.find(i => i.type.startsWith('image/'));
+  if (imgItem) {
+    const blob = imgItem.getAsFile();
+    const ext  = imgItem.type.split('/')[1] || 'png';
+    await uploadFiles([new File([blob], `pasted-image.${ext}`, { type: imgItem.type })]);
+    return;
+  }
+
+  // Text → save as clipboard snippet (readable at /c/{id})
+  const stringItems = items.filter(i => i.kind === 'string');
+  const txtItem = stringItems.find(i => i.type === 'text/plain');
+  if (txtItem) {
+    const text = await new Promise(r => txtItem.getAsString(r));
+    if (!text.trim()) return;
+    await saveClipboardSnippet(text);
+  }
+});
+
+async function saveClipboardSnippet(text) {
+  try {
+    const expiryMinutes = _expiry * 60;
+    const r = await fetch('/api/clipboard/paste', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content_type: 'text',
+        content: text,
+        expiry_minutes: expiryMinutes,
+        session_id: getSession(),
+      }),
+    });
+    const data = await r.json();
+    if (r.status === 201) {
+      _resultUrl = data.share_url;
+      if (resultUrlEl) resultUrlEl.textContent = data.share_url;
+      if (uploadResult) uploadResult.classList.remove('hidden');
+      navigator.clipboard.writeText(data.share_url).catch(() => {});
+      toast('Text saved — link copied!', 'success');
+    } else {
+      toast(data.error || 'Failed to save text', 'error');
+    }
+  } catch {
+    toast('Failed to save clipboard text', 'error');
   }
 }
 
-// ── Drag-and-drop + file select ───────────────────────────────────────────────
-if (dropZone) {
-  dropZone.addEventListener('click', () => fileInput && fileInput.click());
-  dropZone.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') fileInput && fileInput.click(); });
-  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-  dropZone.addEventListener('dragleave', e => { if (!dropZone.contains(e.relatedTarget)) dropZone.classList.remove('drag-over'); });
-  dropZone.addEventListener('drop', e => {
-    e.preventDefault(); dropZone.classList.remove('drag-over');
-    const f = e.dataTransfer.files[0];
-    if (f) setSelectedFile(f);
+// Returns false when the browser can't read the file (directories cause a NotReadableError)
+function _probeReadable(file) {
+  return new Promise(resolve => {
+    const r = new FileReader();
+    r.onload  = () => resolve(true);
+    r.onerror = () => resolve(false);
+    try {
+      r.readAsArrayBuffer(file.slice(0, 4));
+    } catch {
+      resolve(false);
+    }
   });
-}
-if (fileInput) {
-  fileInput.addEventListener('change', () => {
-    if (fileInput.files[0]) setSelectedFile(fileInput.files[0]);
-    fileInput.value = '';
-  });
-}
-
-let _selectedFile = null;
-function setSelectedFile(f) {
-  _selectedFile = f;
-  if (uploadFilename) uploadFilename.textContent = `${f.name} (${fmtSize(f.size)})`;
 }
 
 // ── Upload ────────────────────────────────────────────────────────────────────
-if (uploadForm) {
-  uploadForm.addEventListener('submit', async e => {
-    e.preventDefault();
-    if (!_selectedFile) { toast('Select a file first', 'warn'); return; }
-    if (window.YEET_CONFIG?.storageBlocked) { toast('Storage full — uploads disabled', 'error'); return; }
+async function uploadFiles(files) {
+  if (_cfg.storageBlocked) { toast('Storage full — uploads disabled', 'error'); return; }
+  for (const f of files) await uploadSingle(f);
+}
 
-    const form = new FormData();
-    form.append('file', _selectedFile);
-    form.append('password', document.getElementById('pw-input')?.value || '');
-    form.append('bypass_code', document.getElementById('bypass-input')?.value || '');
-    form.append('session_id', getSession());
+async function uploadSingle(file) {
+  const uid = 'u' + Math.random().toString(36).slice(2, 8);
+  const pw  = dzPassword ? dzPassword.value : '';
 
-    if (progressWrap) progressWrap.style.display = 'flex';
-    if (progressFill) progressFill.style.width = '0%';
-    if (progressText) progressText.textContent = '0%';
-    if (uploadSubmit) uploadSubmit.disabled = true;
-    if (uploadResult) uploadResult.classList.add('hidden');
+  // Progress element
+  const progEl = mkProgressEl(uid, file.name, file.size);
+  if (activeUploads) { activeUploads.appendChild(progEl); activeUploads.style.display = ''; }
 
-    try {
-      const resp = await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', '/upload');
-        xhr.upload.onprogress = ev => {
-          if (ev.lengthComputable) {
-            const pct = Math.round(ev.loaded / ev.total * 100);
-            if (progressFill) progressFill.style.width = pct + '%';
-            if (progressText) progressText.textContent = pct + '%';
-          }
-        };
-        xhr.onload = () => resolve({ status: xhr.status, body: xhr.responseText });
-        xhr.onerror = () => reject(new Error('Network error'));
-        xhr.send(form);
-      });
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('password', pw);
+  fd.append('expiry_hours', String(_expiry));
+  fd.append('session_id', getSession());
 
-      const json = JSON.parse(resp.body);
-      if (resp.status === 201) {
-        _selectedFile = null;
-        if (uploadFilename) uploadFilename.textContent = '';
-        if (document.getElementById('pw-input')) document.getElementById('pw-input').value = '';
-        if (document.getElementById('bypass-input')) document.getElementById('bypass-input').value = '';
-
-        _resultUrl = json.url;
+  return new Promise(resolve => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/upload');
+    xhr.upload.onprogress = ev => {
+      if (ev.lengthComputable) setProgress(uid, Math.round(ev.loaded / ev.total * 100));
+    };
+    xhr.onload = async () => {
+      const json = safeJson(xhr.responseText);
+      if (xhr.status === 201) {
+        doneProgress(uid);
+        _resultUrl = json.url || '';
         if (resultUrlEl) resultUrlEl.textContent = json.url;
         if (uploadResult) uploadResult.classList.remove('hidden');
-
-        toast(`Uploaded — link ready`, 'success');
+        navigator.clipboard.writeText(json.url).catch(() => {});
+        toast('Uploaded — link copied!', 'success');
         if (json.warning) toast('⚠ ' + json.warning, 'warn');
         loadFileList();
       } else {
+        failProgress(uid);
         toast(json.error || 'Upload failed', 'error');
       }
-    } catch (err) {
-      toast('Upload failed: ' + err.message, 'error');
-    } finally {
-      if (progressWrap) progressWrap.style.display = 'none';
-      if (uploadSubmit) uploadSubmit.disabled = false;
-    }
+      setTimeout(() => removeProgress(uid), 3000);
+      resolve(json);
+    };
+    xhr.onerror = () => { failProgress(uid); toast('Upload failed: network error', 'error'); resolve({}); };
+    xhr.send(fd);
   });
+}
+
+function safeJson(text) { try { return JSON.parse(text); } catch { return {}; } }
+
+// ── Progress helpers ──────────────────────────────────────────────────────────
+function mkProgressEl(uid, name, size) {
+  const d = document.createElement('div');
+  d.className = 'upload-progress';
+  d.dataset.uid = uid;
+  d.innerHTML = `<div class="upload-progress-info">
+    <span class="upload-progress-icon">${fileIcon(name)}</span>
+    <span class="upload-progress-name">${esc(name)}</span>
+    <span class="upload-progress-pct" id="pct-${uid}">0%</span>
+  </div>
+  <div class="upload-progress-bar"><div class="upload-progress-fill" id="fill-${uid}" style="width:0"></div></div>`;
+  return d;
+}
+function setProgress(uid, pct) {
+  const fill = document.getElementById('fill-' + uid);
+  const label = document.getElementById('pct-' + uid);
+  if (fill)  fill.style.width  = pct + '%';
+  if (label) label.textContent = pct + '%';
+}
+function doneProgress(uid) {
+  const el = document.querySelector(`[data-uid="${uid}"]`);
+  if (!el) return;
+  el.classList.add('done');
+  setProgress(uid, 100);
+  const label = document.getElementById('pct-' + uid);
+  if (label) label.textContent = '✓';
+}
+function failProgress(uid) {
+  const el = document.querySelector(`[data-uid="${uid}"]`);
+  if (el) el.classList.add('failed');
+  const label = document.getElementById('pct-' + uid);
+  if (label) label.textContent = '✗';
+}
+function removeProgress(uid) {
+  const el = document.querySelector(`[data-uid="${uid}"]`);
+  if (!el) return;
+  el.style.opacity = '0';
+  el.style.transition = 'opacity 300ms';
+  setTimeout(() => {
+    el.remove();
+    if (activeUploads && !activeUploads.querySelector('.upload-progress')) activeUploads.style.display = 'none';
+  }, 320);
 }
 
 function copyResult() {
@@ -162,28 +336,9 @@ function copyResult() {
     if (btn) { btn.textContent = 'copied!'; setTimeout(() => { btn.textContent = 'copy'; }, 2000); }
   });
 }
-
-function dismissResult() {
-  if (uploadResult) uploadResult.classList.add('hidden');
-}
+function dismissResult() { if (uploadResult) uploadResult.classList.add('hidden'); }
 
 // ── File list ─────────────────────────────────────────────────────────────────
-const FILE_ICONS = {
-  pdf:'📄', zip:'📦', gz:'📦', tar:'📦', rar:'📦', '7z':'📦', bz2:'📦', xz:'📦',
-  png:'🖼️', jpg:'🖼️', jpeg:'🖼️', gif:'🖼️', webp:'🖼️', bmp:'🖼️', avif:'🖼️',
-  mp4:'🎬', mov:'🎬', avi:'🎬', mkv:'🎬', webm:'🎬',
-  mp3:'🎵', wav:'🎵', flac:'🎵', aac:'🎵', ogg:'🎵', m4a:'🎵',
-  doc:'📝', docx:'📝', txt:'📝', md:'📝', rtf:'📝', odt:'📝',
-  xls:'📊', xlsx:'📊', csv:'📊', ods:'📊',
-  ppt:'📊', pptx:'📊',
-  json:'⚙', xml:'⚙', yaml:'⚙', yml:'⚙', toml:'⚙',
-  py:'⚡', js:'⚡', ts:'⚡', go:'⚡', rs:'⚡', java:'⚡', cpp:'⚡', c:'⚡',
-};
-function fileIcon(name) {
-  const ext = (name.split('.').pop() || '').toLowerCase();
-  return FILE_ICONS[ext] || '📄';
-}
-
 async function loadFileList() {
   try {
     const r = await fetch('/api/files/all');
@@ -191,18 +346,17 @@ async function loadFileList() {
     _allFiles = data.files || [];
     renderFiles();
   } catch {
-    if (fileList) fileList.innerHTML = '<div class="empty-state"><div class="empty-title">Failed to load files</div></div>';
+    if (fileGrid) fileGrid.innerHTML = '<div class="empty-state"><div class="empty-title">Failed to load files</div></div>';
   }
 }
 
 function renderFiles() {
-  if (!fileList) return;
-  const q = (searchInput?.value || '').toLowerCase();
+  if (!fileGrid) return;
+  const q    = (searchInput?.value || '').toLowerCase();
   const sort = sortSelect?.value || 'recent';
-  const mySession = getSession();
+  const me   = getSession();
 
   let list = _allFiles.filter(f => !q || f.orig_name.toLowerCase().includes(q));
-
   list.sort((a, b) => {
     if (sort === 'recent') return new Date(b.created_at) - new Date(a.created_at);
     if (sort === 'expiry') return new Date(a.expires_at) - new Date(b.expires_at);
@@ -214,169 +368,221 @@ function renderFiles() {
   if (fileCount) fileCount.textContent = list.length;
 
   if (!list.length) {
-    fileList.innerHTML = `<div class="empty-state">
+    fileGrid.innerHTML = `<div class="empty-state">
+      <div class="empty-icon">📂</div>
       <div class="empty-title">${q ? `No results for "${esc(q)}"` : 'No files yet'}</div>
-      <div class="empty-sub">${q ? 'Try a different search term' : 'Upload a file above to get started'}</div>
+      <div class="empty-sub">${q ? 'Try a different search term' : 'Drop files above or paste Ctrl+V to get started'}</div>
     </div>`;
     return;
   }
 
-  const rowH = _compact ? 36 : 48;
-  const canPreview = f => /\.(jpg|jpeg|png|gif|webp|avif|pdf)$/i.test(f.orig_name);
+  const isOwn     = f => f.uploader_session && f.uploader_session === me;
+  const isImg     = f => f.mime_type && f.mime_type.startsWith('image/');
+  const canInline = f => /\.(jpg|jpeg|png|gif|webp|avif|pdf|mp4|webm|mov|mp3|wav|ogg|m4a|txt|md|json|py|js|ts|go|rs)$/i.test(f.orig_name);
 
-  fileList.innerHTML = list.map(f => {
-    const exp = fmtExpiry(f.expires_at);
-    const isOwn = f.uploader_session && f.uploader_session === mySession;
-    const icon = f.has_password ? '🔒' : fileIcon(f.orig_name);
-    const pwBadge = f.has_password ? `<span class="pw-badge">pw</span>` : '';
-    const previewBtn = canPreview(f) ? `<button class="icon-btn" data-action="preview" data-id="${esc(f.id)}" title="Preview">👁</button>` : '';
-    const dlBtn = `<button class="icon-btn" data-action="download" data-id="${esc(f.id)}" data-pw="${f.has_password ? '1' : '0'}" title="Download">⬇</button>`;
-    const delBtn = isOwn ? `<button class="icon-btn danger" data-action="delete" data-id="${esc(f.id)}" title="Delete">🗑</button>` : '';
-    return `<div class="file-row${_compact ? ' compact' : ''}" style="height:${rowH}px" id="row-${f.id}">
-      <div class="file-icon">${icon}</div>
-      <div class="file-name-cell">
-        <span class="file-name">${esc(f.orig_name)}</span>
-        ${pwBadge}
+  fileGrid.innerHTML = list.map(f => {
+    const exp      = fmtExpiry(f.expires_at);
+    const type     = cardType(f);
+    const thumb    = isImg(f)
+      ? `<img src="/raw/${esc(f.id)}" alt="${esc(f.orig_name)}" loading="lazy">`
+      : `<div class="card-thumb-icon">${fileIcon(f.orig_name)}</div>`;
+    const own      = isOwn(f);
+    const pwAttr   = f.has_password ? '1' : '0';
+    const preBtn   = canInline(f) ? `<button class="icon-btn" data-action="preview" data-id="${esc(f.id)}" data-pw="${pwAttr}" title="Preview">👁</button>` : '';
+    const dlBtn    = `<button class="icon-btn" data-action="download" data-id="${esc(f.id)}" data-pw="${pwAttr}" title="Download">⬇</button>`;
+    const linkBtn  = `<button class="icon-btn" data-action="copylink" data-id="${esc(f.id)}" title="Copy link">🔗</button>`;
+    const delBtn   = own ? `<button class="icon-btn danger" data-action="delete" data-id="${esc(f.id)}" title="Delete">🗑</button>` : '';
+    const scanBadge = f.scan_status === 'pending' ? `<div><span class="scan-badge">scanning</span></div>` : '';
+
+    return `<div class="file-card${f.has_password ? ' protected' : ''}" id="card-${esc(f.id)}">
+      <div class="card-thumb type-${type}">${thumb}</div>
+      <div class="card-body">
+        <div class="card-name" title="${esc(f.orig_name)}">${esc(f.orig_name)}</div>
+        <div class="card-meta">
+          <span class="card-size">${fmtSize(f.file_size)}</span>
+          <span class="card-expiry ${exp.cls}">${exp.label}</span>
+        </div>
+        ${scanBadge}
       </div>
-      <div class="file-size">${fmtSize(f.file_size)}</div>
-      <div class="file-expiry ${exp.cls}">${exp.label}</div>
-      <div class="row-actions">${previewBtn}${dlBtn}${delBtn}</div>
+      <div class="card-actions">${preBtn}${dlBtn}${linkBtn}${delBtn}</div>
     </div>`;
   }).join('');
 }
 
-// ── File list events ──────────────────────────────────────────────────────────
-if (fileList) {
-  fileList.addEventListener('click', async e => {
-    const btn = e.target.closest('[data-action]');
-    if (!btn) return;
-    const { action, id, pw } = btn.dataset;
+function cardType(f) {
+  const m = f.mime_type || '';
+  const n = (f.orig_name || '').toLowerCase();
+  if (m.startsWith('image/')) return 'image';
+  if (m.startsWith('video/')) return 'video';
+  if (m.startsWith('audio/')) return 'audio';
+  if (m === 'application/pdf' || /\.(doc|docx|pdf|txt|md|odt|rtf)$/.test(n)) return 'doc';
+  if (/\.(zip|tar|gz|rar|7z|bz2|xz)$/.test(n)) return 'archive';
+  if (/\.(py|js|ts|go|rs|java|cpp|c|css|sql|rb|php|swift|kt)$/.test(n)) return 'code';
+  if (/\.(json|xml|yaml|yml|toml|csv|xls|xlsx|ods)$/.test(n)) return 'data';
+  return 'other';
+}
+
+// ── File grid events ──────────────────────────────────────────────────────────
+if (fileGrid) {
+  fileGrid.addEventListener('click', async e => {
+    const btn    = e.target.closest('[data-action]');
+    const action = btn?.dataset?.action;
 
     if (action === 'preview') {
-      window.open(`/preview/${id}`, '_blank');
+      const { id, pw } = btn.dataset;
+      if (pw === '1') { openPwModal(id); return; }
+      const f = _allFiles.find(x => x.id === id);
+      if (f) showPreviewModal(f);
+      return;
     }
     if (action === 'download') {
-      if (pw === '1') {
-        _pendingDlId = id;
-        if (pwModalInput) pwModalInput.value = '';
-        if (pwError) pwError.textContent = '';
-        if (pwModal) pwModal.classList.remove('hidden');
-        setTimeout(() => pwModalInput?.focus(), 60);
-      } else {
-        window.location.href = `/f/${id}`;
-      }
+      const { id, pw } = btn.dataset;
+      if (pw === '1') { openPwModal(id); return; }
+      window.location.href = `/f/${id}`;
+      return;
+    }
+    if (action === 'copylink') {
+      await navigator.clipboard.writeText(`${location.origin}/f/${btn.dataset.id}`);
+      toast('Link copied', 'success');
+      return;
     }
     if (action === 'delete') {
-      await deleteFile(id);
+      await deleteFile(btn.dataset.id);
+      return;
     }
+
+    // No btn or unrecognized action → treat as card-body click
+    const card = e.target.closest('.file-card');
+    if (!card) return;
+    const id = card.id.replace(/^card-/, '');
+    const f  = _allFiles.find(x => x.id === id);
+    if (!f) return;
+    if (f.has_password) { openPwModal(id); return; }
+    const canInline = /\.(jpg|jpeg|png|gif|webp|avif|pdf|mp4|webm|mov|mp3|wav|ogg|m4a|txt|md|json|py|js|ts|go|rs)$/i.test(f.orig_name);
+    if (canInline) { showPreviewModal(f); return; }
+    window.location.href = `/f/${id}`;
   });
 }
 
-async function deleteFile(fileId) {
+async function deleteFile(id) {
   if (!confirm('Delete this file permanently?')) return;
   try {
-    const r = await fetch(`/api/files/${fileId}`, {
-      method: 'DELETE',
-      headers: { 'X-Session-ID': getSession() },
-    });
+    const r = await fetch(`/api/files/${id}`, { method: 'DELETE', headers: { 'X-Session-ID': getSession() } });
     if (r.ok) {
-      _allFiles = _allFiles.filter(f => f.id !== fileId);
-      const row = document.getElementById(`row-${fileId}`);
-      if (row) row.remove();
+      _allFiles = _allFiles.filter(f => f.id !== id);
+      const card = document.getElementById(`card-${id}`);
+      if (card) { card.style.transition = 'opacity 240ms, transform 240ms'; card.style.opacity = '0'; card.style.transform = 'scale(0.92)'; setTimeout(() => { card.remove(); if (fileCount) fileCount.textContent = _allFiles.filter(f => !document.getElementById('search-input')?.value || f.orig_name.toLowerCase().includes(document.getElementById('search-input').value.toLowerCase())).length; }, 260); }
       toast('File deleted', 'warn');
     } else {
       const j = await r.json().catch(() => ({}));
       toast(j.error || 'Delete failed', 'error');
     }
-  } catch {
-    toast('Delete failed: network error', 'error');
+  } catch { toast('Delete failed: network error', 'error'); }
+}
+
+// ── Preview modal ─────────────────────────────────────────────────────────────
+function showPreviewModal(f) {
+  const mime = f.mime_type || '';
+  const name = f.orig_name || '';
+  const id   = f.id;
+  const isText = mime.startsWith('text/') || /\.(txt|md|json|yaml|yml|toml|csv|py|js|ts|go|rs|java|cpp|c|css|sql|rb|php|swift|kt)$/i.test(name);
+
+  let bodyHtml;
+  if (mime.startsWith('image/'))   bodyHtml = `<img src="/raw/${esc(id)}" alt="${esc(name)}" class="preview-media-img">`;
+  else if (mime === 'application/pdf') bodyHtml = `<embed src="/raw/${esc(id)}" type="application/pdf" class="preview-media-pdf">`;
+  else if (mime.startsWith('video/')) bodyHtml = `<video src="/raw/${esc(id)}" controls class="preview-media-video"></video>`;
+  else if (mime.startsWith('audio/')) bodyHtml = `<div class="preview-audio-wrap"><audio src="/raw/${esc(id)}" controls class="preview-media-audio"></audio></div>`;
+  else if (isText) bodyHtml = `<div class="preview-loading" id="preview-text-body">Loading…</div>`;
+  else bodyHtml = `<div class="preview-unavailable"><div style="font-size:38px;margin-bottom:12px">${fileIcon(name)}</div><p>No preview available</p><p style="font-size:12px;color:var(--text-3);margin-top:6px">Use the download button</p></div>`;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal-box preview-modal-box">
+    <div class="modal-header">
+      <span class="modal-title" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</span>
+      <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
+        <a href="/f/${esc(id)}" class="btn-ghost" style="font-size:12px;height:28px;padding:0 10px">⬇ Download</a>
+        <button class="modal-close" id="_pv-close">✕</button>
+      </div>
+    </div>
+    <div class="preview-modal-body">${bodyHtml}</div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#_pv-close').onclick = () => overlay.remove();
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+  if (isText) {
+    fetch(`/raw/${id}`)
+      .then(r => r.text())
+      .then(txt => {
+        const el = overlay.querySelector('#preview-text-body');
+        if (el) { el.outerHTML = `<pre class="preview-text-content">${esc(txt.slice(0, 100_000))}</pre>`; }
+      })
+      .catch(() => {});
   }
 }
 
 // ── Search + sort ─────────────────────────────────────────────────────────────
 if (searchInput) searchInput.addEventListener('input', renderFiles);
-if (sortSelect) sortSelect.addEventListener('change', renderFiles);
+if (sortSelect)  sortSelect.addEventListener('change', renderFiles);
 
-// ── Password modal ────────────────────────────────────────────────────────────
+// ── Password modal (for protected file download) ──────────────────────────────
+function openPwModal(id) {
+  _pendingDlId = id;
+  if (pwModalInput) pwModalInput.value = '';
+  if (pwError)      pwError.textContent = '';
+  if (pwModal)      pwModal.classList.remove('hidden');
+  setTimeout(() => pwModalInput?.focus(), 60);
+}
 function closePwModal() {
   if (pwModal) pwModal.classList.add('hidden');
   _pendingDlId = null;
 }
-
 if (pwModalClose) pwModalClose.addEventListener('click', closePwModal);
 if (pwModal) pwModal.addEventListener('click', e => { if (e.target === pwModal) closePwModal(); });
-
 if (pwSubmit) {
   pwSubmit.addEventListener('click', async () => {
     const pw = pwModalInput?.value?.trim();
     if (!pw) { if (pwError) pwError.textContent = 'Enter a password.'; return; }
     if (pwError) pwError.textContent = '';
-    pwSubmit.disabled = true;
-    pwSubmit.textContent = 'Checking…';
-
+    pwSubmit.disabled = true; pwSubmit.textContent = 'Checking…';
     try {
       const r = await fetch('/api/verify-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ file_id: _pendingDlId, password: pw }),
       });
-      const data = await r.json();
-      if (data.success) {
-        closePwModal();
-        window.location.href = data.download_url;
-      } else {
-        if (pwError) pwError.textContent = data.error || 'Incorrect password.';
-      }
-    } catch {
-      if (pwError) pwError.textContent = 'Network error. Try again.';
-    } finally {
-      pwSubmit.disabled = false;
-      pwSubmit.textContent = 'Unlock & download';
-    }
+      const d = await r.json();
+      if (d.success) { closePwModal(); window.location.href = d.download_url; }
+      else { if (pwError) pwError.textContent = d.error || 'Incorrect password.'; }
+    } catch { if (pwError) pwError.textContent = 'Network error. Try again.'; }
+    finally { pwSubmit.disabled = false; pwSubmit.textContent = 'Unlock & download'; }
   });
 }
-
-if (pwModalInput) {
-  pwModalInput.addEventListener('keydown', e => { if (e.key === 'Enter') pwSubmit?.click(); });
-}
+if (pwModalInput) pwModalInput.addEventListener('keydown', e => { if (e.key === 'Enter') pwSubmit?.click(); });
 
 // ── Settings modal ────────────────────────────────────────────────────────────
-if (settingsBtn) settingsBtn.addEventListener('click', () => settingsModal?.classList.remove('hidden'));
+if (settingsBtn)   settingsBtn.addEventListener('click', () => settingsModal?.classList.remove('hidden'));
 if (settingsClose) settingsClose.addEventListener('click', () => settingsModal?.classList.add('hidden'));
 if (settingsModal) settingsModal.addEventListener('click', e => { if (e.target === settingsModal) settingsModal.classList.add('hidden'); });
 
-document.querySelectorAll('[data-setting]').forEach(btn => {
+document.querySelectorAll('[data-setting="accent"]').forEach(btn => {
   btn.addEventListener('click', () => {
-    const { setting, value } = btn.dataset;
-    if (setting === 'accent') {
-      _accent = value;
-      localStorage.setItem('yeet_accent', value);
-      applyAccent(value);
-      document.querySelectorAll('[data-setting="accent"]').forEach(b => {
-        b.classList.remove('active', 'active-mono');
-      });
-      btn.classList.add(value === 'mono' ? 'active-mono' : 'active');
-    }
+    const val = btn.dataset.value;
+    _accent = val;
+    localStorage.setItem('yeet_accent', val);
+    applyAccent(val);
+    document.querySelectorAll('[data-setting="accent"]').forEach(b => b.classList.remove('active', 'active-mono'));
+    btn.classList.add(val === 'mono' ? 'active-mono' : 'active');
   });
 });
-
-if (compactToggle) {
-  compactToggle.addEventListener('change', e => {
-    _compact = e.target.checked;
-    localStorage.setItem('yeet_compact', _compact ? '1' : '0');
-    renderFiles();
-  });
-}
 
 // ── Deleted / virus log ───────────────────────────────────────────────────────
 if (deletedSection) {
   deletedSection.addEventListener('toggle', () => {
-    if (deletedSection.open && deletedList && !deletedList.children.length) {
-      loadDeletedFiles();
-    }
+    if (deletedSection.open && deletedList && !deletedList.children.length) loadDeletedFiles();
   });
 }
-
 async function loadDeletedFiles() {
   if (!deletedList) return;
   try {
@@ -387,39 +593,53 @@ async function loadDeletedFiles() {
       deletedList.innerHTML = '<div class="deleted-item"><span class="d-name">No recent removals by scanner.</span></div>';
       return;
     }
-    deletedList.innerHTML = entries.map(e => `
-      <div class="deleted-item">
-        <span class="d-name">${esc(e.filename)}</span>
-        <span class="d-reason">virus detected</span>
-        <span class="d-time">${timeAgo(e.ts)}</span>
-      </div>`).join('');
+    deletedList.innerHTML = entries.map(e => `<div class="deleted-item">
+      <span class="d-name">${esc(e.filename)}</span>
+      <span class="d-reason">virus detected</span>
+      <span class="d-time">${timeAgo(e.ts)}</span>
+    </div>`).join('');
   } catch {
     deletedList.innerHTML = '<div class="deleted-item"><span class="d-name">Failed to load.</span></div>';
   }
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
+const FILE_ICONS = {
+  pdf:'📄', zip:'📦', gz:'📦', tar:'📦', rar:'📦', '7z':'📦', bz2:'📦', xz:'📦',
+  png:'🖼', jpg:'🖼', jpeg:'🖼', gif:'🖼', webp:'🖼', bmp:'🖼', avif:'🖼',
+  mp4:'🎬', mov:'🎬', avi:'🎬', mkv:'🎬', webm:'🎬',
+  mp3:'🎵', wav:'🎵', flac:'🎵', aac:'🎵', ogg:'🎵', m4a:'🎵',
+  doc:'📝', docx:'📝', txt:'📝', md:'📝', rtf:'📝', odt:'📝',
+  xls:'📊', xlsx:'📊', csv:'📊', ods:'📊',
+  json:'⚙', xml:'⚙', yaml:'⚙', yml:'⚙', toml:'⚙',
+  py:'⚡', js:'⚡', ts:'⚡', go:'⚡', rs:'⚡', java:'⚡', cpp:'⚡', c:'⚡', css:'⚡',
+};
+function fileIcon(name) {
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  return FILE_ICONS[ext] || '📄';
+}
+
 function fmtSize(b) {
-  if (b < 1024) return b + ' B';
-  if (b < 1_048_576) return (b / 1024).toFixed(1) + ' KB';
+  if (b < 1024)        return b + ' B';
+  if (b < 1_048_576)   return (b / 1024).toFixed(1) + ' KB';
   if (b < 1_073_741_824) return (b / 1_048_576).toFixed(1) + ' MB';
   return (b / 1_073_741_824).toFixed(2) + ' GB';
 }
 
-function fmtExpiry(isoStr) {
-  const ms = new Date(isoStr).getTime() - Date.now();
+function fmtExpiry(iso) {
+  const ms = new Date(iso).getTime() - Date.now();
   if (ms <= 0) return { label: 'expired', cls: 'exp-urgent' };
   const h = ms / 3_600_000;
-  if (h >= 48) return { label: Math.floor(h / 24) + 'd', cls: 'exp-ok' };
-  if (h >= 6)  return { label: Math.floor(h) + 'h', cls: 'exp-ok' };
-  if (h >= 1)  return { label: Math.floor(h) + 'h', cls: 'exp-warn' };
-  return { label: Math.floor(ms / 60_000) + 'm', cls: 'exp-urgent' };
+  if (h >= 48) return { label: Math.floor(h / 24) + 'd',  cls: 'exp-ok' };
+  if (h >= 6)  return { label: Math.floor(h) + 'h',       cls: 'exp-ok' };
+  if (h >= 1)  return { label: Math.floor(h) + 'h',       cls: 'exp-warn' };
+  return             { label: Math.floor(ms / 60_000) + 'm', cls: 'exp-urgent' };
 }
 
-function timeAgo(isoStr) {
-  const diff = Date.now() - new Date(isoStr).getTime();
+function timeAgo(iso) {
+  const diff = Date.now() - new Date(iso).getTime();
   const m = Math.floor(diff / 60_000);
-  if (m < 1) return 'just now';
+  if (m < 1)  return 'just now';
   if (m < 60) return m + 'm ago';
   const h = Math.floor(m / 60);
   if (h < 24) return h + 'h ago';
@@ -428,20 +648,17 @@ function timeAgo(isoStr) {
 
 function esc(s) {
   return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
-const TOAST_COLORS = { success: '#22c55e', error: '#ef4444', info: '#3b82f6', warn: '#f59e0b' };
-function toast(message, type = 'info') {
+const TOAST_COLORS = { success: '#00F5A0', error: '#FF3366', info: '#00D4FF', warn: '#FF6B35' };
+function toast(msg, type = 'info') {
   if (!toastContainer) return;
   const id = 't' + Math.random().toString(36).slice(2);
   const el = document.createElement('div');
   el.className = 'toast'; el.id = id;
-  el.innerHTML = `<div class="toast-dot" style="background:${TOAST_COLORS[type] || TOAST_COLORS.info}"></div><span>${esc(message)}</span>`;
+  el.innerHTML = `<div class="toast-dot" style="background:${TOAST_COLORS[type]||TOAST_COLORS.info}"></div><span>${esc(msg)}</span>`;
   toastContainer.appendChild(el);
   el.addEventListener('click', () => dismissToast(id));
   setTimeout(() => dismissToast(id), 4000);

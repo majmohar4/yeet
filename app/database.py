@@ -73,6 +73,22 @@ async def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_bypass_expires    ON bypass_codes(expires_at);
         CREATE INDEX IF NOT EXISTS idx_audit_ts          ON audit_log(ts);
         CREATE INDEX IF NOT EXISTS idx_audit_action      ON audit_log(action, ts);
+
+        CREATE TABLE IF NOT EXISTS clipboard_items (
+            id          TEXT PRIMARY KEY,
+            type        TEXT NOT NULL,
+            content     TEXT NOT NULL,
+            preview     TEXT NOT NULL DEFAULT '',
+            encrypted   INTEGER NOT NULL DEFAULT 0,
+            pinned      INTEGER NOT NULL DEFAULT 0,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            expires_at  TEXT NOT NULL,
+            session_id  TEXT,
+            client_ip   TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_clipboard_expires ON clipboard_items(expires_at);
+        CREATE INDEX IF NOT EXISTS idx_clipboard_session ON clipboard_items(session_id, created_at);
     """)
     # Migration: add uploader_session column to existing databases
     try:

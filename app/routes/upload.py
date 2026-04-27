@@ -89,6 +89,7 @@ async def upload_file(
     max_downloads: str = Form(default=""),
     bypass_code: str = Form(default=""),
     session_id: str = Form(default=""),
+    expiry_hours: str = Form(default=""),
     website: str = Form(default=""),  # honeypot
 ):
     ip = _client_ip(request)
@@ -119,7 +120,7 @@ async def upload_file(
     try:
         return await _do_upload(
             request, file, password, max_downloads,
-            ip, ua, max_file, storage_limit, bypassed, session_id,
+            ip, ua, max_file, storage_limit, bypassed, session_id, expiry_hours,
         )
     finally:
         await concurrent.release(ip)
@@ -127,7 +128,7 @@ async def upload_file(
 
 async def _do_upload(
     request, file, password, max_downloads,
-    ip, ua, max_file, storage_limit, bypassed, session_id="",
+    ip, ua, max_file, storage_limit, bypassed, session_id="", expiry_hours="",
 ):
     # ── File size check (before reading full body to fail fast) ───────────────
     content_length = int(request.headers.get("content-length", 0))
@@ -199,6 +200,10 @@ async def _do_upload(
         password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
     expiry_h = get_file_expiry_hours()
+    if expiry_hours.strip().isdigit():
+        requested = int(expiry_hours.strip())
+        if 1 <= requested <= 168:
+            expiry_h = requested
     expires_at = (datetime.now(timezone.utc) + timedelta(hours=expiry_h)).isoformat()
 
     max_dl = None

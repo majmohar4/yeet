@@ -32,7 +32,6 @@
     </div>
     <div class="header-right">
       <button class="btn-ghost" id="settings-btn" title="Settings">⚙</button>
-      <a href="/" class="btn-primary">Upload</a>
     </div>
   </header>
 
@@ -64,22 +63,16 @@
         <div class="setting-group">
           <div class="setting-label">Accent color</div>
           <div class="option-row">
-            <button class="opt-btn active" data-setting="accent" data-value="blue">Blue</button>
+            <button class="opt-btn active" data-setting="accent" data-value="cyan">Cyan</button>
+            <button class="opt-btn" data-setting="accent" data-value="purple">Purple</button>
             <button class="opt-btn" data-setting="accent" data-value="mono">Mono</button>
-          </div>
-        </div>
-        <div class="setting-group">
-          <div class="setting-label">Display</div>
-          <div class="toggle-row">
-            <input type="checkbox" id="compact-toggle">
-            <label for="compact-toggle">Compact list rows</label>
           </div>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Password modal -->
+  <!-- Password modal (for protected downloads) -->
   <div class="modal-overlay hidden" id="pw-modal" role="dialog" aria-modal="true">
     <div class="modal-box">
       <div class="modal-header">
@@ -95,16 +88,17 @@
     </div>
   </div>
 
+  {% block fab %}{% endblock %}
+
 </div><!-- #app -->
 
 <script>
 window.YEET_CONFIG = {
-  maxFileMb: {{ max_file_mb|default(100) }},
-  expiryHours: {{ expiry_hours|default(24) }},
-  storageBlocked: {{ 'true' if storage_blocked else 'false' }},
+  maxFileMb:      {{ max_file_mb|default(100) }},
+  expiryHours:    {{ expiry_hours|default(24) }},
+  storageBlocked: {{ 'true' if storage_blocked is defined and storage_blocked else 'false' }},
 };
 </script>
-{% block scripts %}{% endblock %}
 <script src="/static/js/app.js"></script>
 </body>
 </html>

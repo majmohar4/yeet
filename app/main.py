@@ -13,7 +13,7 @@ from app.config import settings
 from app.database import close_db, init_db
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.security import SecurityHeadersMiddleware
-from app.routes import admin, download, files, upload
+from app.routes import admin, clipboard, download, files, upload
 from app.services.cleanup import cleanup_loop
 
 load_dotenv()
@@ -32,6 +32,7 @@ async def lifespan(app: FastAPI):
     settings.validate()
     settings.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     settings.ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+    (settings.BASE_DIR / "clipboard").mkdir(parents=True, exist_ok=True)
 
     await init_db()
     logger.info("yeet %s started", settings.APP_VERSION)
@@ -64,6 +65,64 @@ app.include_router(upload.router)
 app.include_router(download.router)
 app.include_router(files.router)
 app.include_router(admin.router)
+app.include_router(clipboard.router)
+
+
+@app.get("/c/{item_id}/raw")
+async def clipboard_raw(item_id: str):
+    from app.database import get_db as _get_db
+    from datetime import datetime, timezone
+    from fastapi.responses import PlainTextResponse, Response as _Response
+
+    db = await _get_db()
+    now = datetime.now(timezone.utc).isoformat()
+    async with db.execute(
+        "SELECT type, content FROM clipboard_items WHERE id=? AND (pinned=1 OR expires_at > ?)",
+        (item_id, now),
+    ) as cur:
+        row = await cur.fetchone()
+    if not row:
+        return _Response(status_code=404)
+    if row[0] == "text":
+        return PlainTextResponse(row[1])
+    # image: redirect to image endpoint
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url=f"/api/clipboard/image/{item_id}")
+
+
+@app.get("/c/{item_id}")
+async def clipboard_view(request: Request, item_id: str):
+    from app.database import get_db as _get_db
+    from datetime import datetime, timezone
+
+    db = await _get_db()
+    now = datetime.now(timezone.utc).isoformat()
+    async with db.execute(
+        "SELECT id,type,content,preview,encrypted,pinned,created_at,expires_at "
+        "FROM clipboard_items WHERE id=? AND (pinned=1 OR expires_at > ?)",
+        (item_id, now),
+    ) as cur:
+        row = await cur.fetchone()
+    if not row:
+        return _templates.TemplateResponse(
+            "error.html",
+            {"request": request, "status": 404, "message": "Clipboard item not found or expired."},
+            status_code=404,
+        )
+    item = dict(row)
+    if item["type"] == "image":
+        item["image_url"] = f"/api/clipboard/image/{item_id}"
+    from app.services.config_manager import get_file_expiry_hours
+    return _templates.TemplateResponse(
+        "clipboard_view.html",
+        {
+            "request": request,
+            "item": item,
+            "expiry_hours": get_file_expiry_hours(),
+            "max_file_mb": 100,
+            "storage_blocked": False,
+        },
+    )
 
 
 @app.get("/health")

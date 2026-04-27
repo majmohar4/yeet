@@ -3,52 +3,38 @@
 
 {% block content %}
 
-<form class="upload-form" id="upload-form" novalidate>
-  <!-- Drop zone -->
-  <div class="drop-zone{% if storage_blocked %} disabled{% endif %}" id="drop-zone" tabindex="0" role="button" aria-label="Upload files">
-    <div class="drop-zone-icon">⬆</div>
-    <div class="drop-zone-title">
-      {% if storage_blocked %}
-        Uploads disabled — storage full
-      {% else %}
-        Drop file here or <span style="color:var(--accent)">click to browse</span>
-      {% endif %}
+<!-- ── Unified drop zone ──────────────────────────────────── -->
+<div class="drop-zone{% if storage_blocked %} disabled{% endif %}" id="drop-zone" tabindex="0" role="button" aria-label="Upload area">
+  <div class="dz-border"></div>
+  <div class="dz-glow"></div>
+
+  <div class="dz-prompt" id="dz-prompt">
+    <span class="dz-icon">⬆</span>
+    <div class="dz-title">Drop files, or <span class="accent">click to browse</span></div>
+    <div class="dz-sub">Paste Ctrl+V anywhere &middot; {{ max_file_mb }}MB max</div>
+  </div>
+
+  <div class="dz-controls" id="dz-controls">
+    <div class="dz-pw-group">
+      <input class="form-input" type="password" id="dz-password" placeholder="🔒 Password (optional)" autocomplete="new-password">
+      <button class="icon-input-btn" id="dz-gen-pw" title="Generate password">🎲</button>
     </div>
-    <div class="drop-zone-sub">{{ max_file_mb }}MB max &middot; expires after {{ expiry_hours }}h</div>
-  </div>
-  <input type="file" id="file-input" name="file" hidden>
-
-  <!-- Options -->
-  <div class="form-extras">
-    <details id="pw-details">
-      <summary>🔒 Password <span style="color:var(--text-3);margin-left:4px">(optional)</span></summary>
-      <div class="details-body">
-        <input class="form-input" type="password" name="password" id="pw-input" placeholder="Leave blank for a public link" autocomplete="new-password">
-        <span class="form-hint">⚠ Password protection provides basic privacy but does not encrypt the stored file.</span>
+    <div class="dz-options">
+      <span class="dz-option-label">Expiry:</span>
+      <div class="expiry-chips" id="expiry-chips">
+        <button class="chip" data-hours="1">1h</button>
+        <button class="chip" data-hours="24">24h</button>
+        <button class="chip" data-hours="168">7d</button>
       </div>
-    </details>
-    <details id="bypass-details">
-      <summary>🎫 Bypass code <span style="color:var(--text-3);margin-left:4px">(optional)</span></summary>
-      <div class="details-body">
-        <input class="form-input" type="text" name="bypass_code" id="bypass-input" placeholder="Admin bypass code — skips all limits" autocomplete="off" spellcheck="false">
-      </div>
-    </details>
-  </div>
-
-  <!-- Footer row: submit + progress + filename -->
-  <div class="upload-footer">
-    <button type="submit" class="upload-submit" id="upload-submit"{% if storage_blocked %} disabled{% endif %}>Upload file</button>
-    <div class="progress-wrap" id="progress-wrap" style="display:none">
-      <div class="progress-track">
-        <div class="progress-fill" id="progress-fill"></div>
-      </div>
-      <span class="progress-text" id="progress-text">0%</span>
     </div>
-    <span class="upload-filename" id="upload-filename"></span>
   </div>
-</form>
+</div>
+<input type="file" id="file-input" multiple hidden>
 
-<!-- Upload result -->
+<!-- ── Active uploads ────────────────────────────────────── -->
+<div class="active-uploads" id="active-uploads" style="display:none"></div>
+
+<!-- ── Upload result ─────────────────────────────────────── -->
 <div class="upload-result hidden" id="upload-result">
   <span class="upload-result-label">✓ link ready</span>
   <span class="upload-result-url" id="upload-result-url"></span>
@@ -56,10 +42,10 @@
   <button class="upload-result-dismiss" onclick="dismissResult()" title="Dismiss">×</button>
 </div>
 
-<!-- File list -->
+<!-- ── File grid ─────────────────────────────────────────── -->
 <div class="section-header">
   <div class="section-title">
-    Recent uploads
+    Your uploads
     <span class="file-count" id="file-count">0</span>
   </div>
   <div class="section-actions">
@@ -72,18 +58,9 @@
   </div>
 </div>
 
-<div class="file-table">
-  <div class="file-table-head">
-    <div></div>
-    <div class="col-head">Name</div>
-    <div class="col-head r">Size</div>
-    <div class="col-head r">Expiry</div>
-    <div class="col-head r">Actions</div>
-  </div>
-  <div id="file-list"></div>
-</div>
+<div class="file-grid" id="file-grid"></div>
 
-<!-- Deleted / scanner log -->
+<!-- ── Deleted / scanner log ─────────────────────────────── -->
 <div class="deleted-wrap">
   <details class="deleted-section" id="deleted-section">
     <summary>⚠ Recently removed files (security log)</summary>
@@ -91,4 +68,56 @@
   </details>
 </div>
 
+<!-- ── Privacy policy ────────────────────────────────────── -->
+<details class="privacy-section" id="privacy-details">
+  <summary class="privacy-toggle">🔐 Privacy &amp; data policy</summary>
+  <div class="privacy-content">
+    <div class="privacy-col">
+      <h5>What we collect</h5>
+      <ul>
+        <li>Files you upload (stored on our servers)</li>
+        <li>IP addresses (rate limiting &amp; abuse prevention)</li>
+        <li>Upload timestamps and file metadata</li>
+        <li>Browser session ID stored in localStorage (for delete permissions)</li>
+      </ul>
+      <h5>What we don't collect</h5>
+      <ul>
+        <li>No accounts, email addresses, or names required</li>
+        <li>No browsing history or cross-site tracking</li>
+        <li>No third-party analytics or ad trackers</li>
+        <li>No file content analysis (virus scanning only)</li>
+      </ul>
+      <h5>Security</h5>
+      <ul>
+        <li>All connections encrypted via HTTPS</li>
+        <li>Virus scanning on every upload (ClamAV)</li>
+        <li>Rate limiting to prevent abuse</li>
+        <li>Password hashing with bcrypt (we never see your passwords)</li>
+      </ul>
+    </div>
+    <div class="privacy-col">
+      <h5>Data retention</h5>
+      <ul>
+        <li>Files expire after your chosen time (1h – 7d)</li>
+        <li>Expired files archived for 24h (server access only), then permanently deleted</li>
+        <li>Audit logs retained for 90 days for abuse investigation</li>
+        <li>IP-based rate limit entries deleted after 2 hours</li>
+      </ul>
+      <h5>Your rights</h5>
+      <ul>
+        <li>Delete your own files anytime from the session you uploaded them</li>
+        <li>All files automatically deleted after expiry — no residual copies</li>
+        <li>No account needed; nothing tied to your identity</li>
+      </ul>
+      <h5>Abuse &amp; DMCA</h5>
+      <p>We do not tolerate illegal, harmful, or copyrighted content uploaded without permission. Files will be removed immediately upon valid report.</p>
+      <p>Contact: <a href="mailto:info@majmohar.eu">info@majmohar.eu</a></p>
+    </div>
+  </div>
+</details>
+
+{% endblock %}
+
+{% block fab %}
+<button class="fab" id="fab-btn" title="Upload a file">⬆</button>
 {% endblock %}

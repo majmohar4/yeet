@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Clipboard — Yeet{% endblock %}
+
+{% block content %}
+<div class="cb-view-page">
+
+  <div class="cb-view-header">
+    <span class="cb-view-icon">{% if item.type == 'image' %}🖼{% else %}📝{% endif %}</span>
+    <span class="cb-view-label">Shared clipboard item</span>
+    {% if item.encrypted %}<span class="cb-view-badge encrypted">🔒 Encrypted</span>{% endif %}
+    {% if item.pinned %}<span class="cb-view-badge pinned">📌 Pinned</span>{% endif %}
+    <span class="cb-view-meta">via Yeet</span>
+  </div>
+
+  {% if item.type == 'text' %}
+  <div class="cb-view-card">
+    <pre class="cb-view-text" id="cb-content">{{ item.content }}</pre>
+  </div>
+  <div class="cb-view-actions">
+    <button class="btn-primary" id="copy-btn" onclick="copyText()">Copy text</button>
+    <a class="btn-ghost" href="/c/{{ item.id }}/raw" target="_blank">Raw</a>
+  </div>
+
+  {% else %}
+  <div class="cb-view-card cb-view-img-card">
+    <img src="{{ item.image_url }}" alt="Shared image" class="cb-view-img">
+  </div>
+  <div class="cb-view-actions">
+    <button class="btn-primary" id="copy-btn" onclick="copyImage()">Copy image</button>
+    <a class="btn-ghost" href="/c/{{ item.id }}/raw" download>Download</a>
+  </div>
+  {% endif %}
+
+  <div class="cb-view-footer">
+    <a href="/" class="footer-link" style="font-size:13px">← Share your own via Yeet</a>
+  </div>
+
+</div>
+
+<script>
+async function copyText() {
+  const btn = document.getElementById('copy-btn');
+  try {
+    await navigator.clipboard.writeText(document.getElementById('cb-content').textContent);
+    btn.textContent = '✓ Copied!';
+  } catch {
+    btn.textContent = 'Select text manually';
+  }
+  setTimeout(() => { btn.textContent = 'Copy text'; }, 2000);
+}
+
+async function copyImage() {
+  const btn = document.getElementById('copy-btn');
+  try {
+    const r = await fetch('{{ item.image_url }}');
+    const blob = await r.blob();
+    await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+    btn.textContent = '✓ Copied!';
+  } catch {
+    btn.textContent = 'Right-click → Copy image';
+  }
+  setTimeout(() => { btn.textContent = 'Copy image'; }, 2500);
+}
+</script>
+{% endblock %}
