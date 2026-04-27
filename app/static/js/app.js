@@ -451,7 +451,7 @@ if (fileGrid) {
     if (action === 'download') {
       const { id, pw } = btn.dataset;
       if (pw === '1') { openPwModal(id); return; }
-      window.location.href = `/f/${id}`;
+      window.open(`/f/${id}`, '_blank', 'noopener');
       return;
     }
     if (action === 'copylink') {
@@ -473,7 +473,7 @@ if (fileGrid) {
     if (f.has_password) { openPwModal(id); return; }
     const canInline = /\.(jpg|jpeg|png|gif|webp|avif|pdf|mp4|webm|mov|mp3|wav|ogg|m4a|txt|md|json|py|js|ts|go|rs)$/i.test(f.orig_name);
     if (canInline) { showPreviewModal(f); return; }
-    window.location.href = `/f/${id}`;
+    window.open(`/f/${id}`, '_blank', 'noopener');
   });
 }
 
@@ -500,9 +500,14 @@ function showPreviewModal(f) {
   const id   = f.id;
   const isText = mime.startsWith('text/') || /\.(txt|md|json|yaml|yml|toml|csv|py|js|ts|go|rs|java|cpp|c|css|sql|rb|php|swift|kt)$/i.test(name);
 
+  // PDFs can't be embedded — server sends frame-ancestors: none which blocks <embed>/<iframe>
+  if (mime === 'application/pdf') {
+    window.open(`/raw/${id}`, '_blank', 'noopener');
+    return;
+  }
+
   let bodyHtml;
   if (mime.startsWith('image/'))   bodyHtml = `<img src="/raw/${esc(id)}" alt="${esc(name)}" class="preview-media-img">`;
-  else if (mime === 'application/pdf') bodyHtml = `<embed src="/raw/${esc(id)}" type="application/pdf" class="preview-media-pdf">`;
   else if (mime.startsWith('video/')) bodyHtml = `<video src="/raw/${esc(id)}" controls class="preview-media-video"></video>`;
   else if (mime.startsWith('audio/')) bodyHtml = `<div class="preview-audio-wrap"><audio src="/raw/${esc(id)}" controls class="preview-media-audio"></audio></div>`;
   else if (isText) bodyHtml = `<div class="preview-loading" id="preview-text-body">Loading…</div>`;
@@ -569,7 +574,7 @@ if (pwSubmit) {
         body: JSON.stringify({ file_id: _pendingDlId, password: pw }),
       });
       const d = await r.json();
-      if (d.success) { closePwModal(); window.location.href = d.download_url; }
+      if (d.success) { closePwModal(); window.open(d.download_url, '_blank', 'noopener'); }
       else { if (pwError) pwError.textContent = d.error || 'Incorrect password.'; }
     } catch { if (pwError) pwError.textContent = 'Network error. Try again.'; }
     finally { pwSubmit.disabled = false; pwSubmit.textContent = 'Unlock & download'; }
