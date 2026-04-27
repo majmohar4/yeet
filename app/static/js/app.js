@@ -140,7 +140,7 @@ if (dropZone) {
         if (entry && entry.isDirectory) { hadFolder = true; continue; }
         const f = item.getAsFile();
         if (!f) continue;
-        if (!entry && !(await _probeReadable(f))) { hadFolder = true; continue; }
+        if (!(await _probeReadable(f))) { hadFolder = true; continue; }
         files.push(f);
       }
     } else {
@@ -227,7 +227,9 @@ function _probeReadable(file) {
     r.onload  = () => resolve(true);
     r.onerror = () => resolve(false);
     try {
-      r.readAsArrayBuffer(file.slice(0, 4));
+      // slice(0,4) of a 0-byte File (dropped directory) returns an empty Blob
+      // that fires onload instead of onerror — read the raw File in that case.
+      r.readAsArrayBuffer(file.size > 0 ? file.slice(0, 4) : file);
     } catch {
       resolve(false);
     }
@@ -378,6 +380,7 @@ function renderFiles() {
 
   const isOwn     = f => f.uploader_session && f.uploader_session === me;
   const isImg     = f => f.mime_type && f.mime_type.startsWith('image/');
+  const isText    = f => (f.mime_type || '').startsWith('text/') || /\.(txt|md)$/i.test(f.orig_name);
   const canInline = f => /\.(jpg|jpeg|png|gif|webp|avif|pdf|mp4|webm|mov|mp3|wav|ogg|m4a|txt|md|json|py|js|ts|go|rs)$/i.test(f.orig_name);
 
   fileGrid.innerHTML = list.map(f => {
@@ -385,7 +388,9 @@ function renderFiles() {
     const type     = cardType(f);
     const thumb    = isImg(f)
       ? `<img src="/raw/${esc(f.id)}" alt="${esc(f.orig_name)}" loading="lazy">`
-      : `<div class="card-thumb-icon">${fileIcon(f.orig_name)}</div>`;
+      : isText(f)
+        ? `<div class="card-thumb-text" data-text-id="${esc(f.id)}" style="overflow:hidden;padding:8px 10px;font-size:10px;line-height:1.5;white-space:pre-wrap;word-break:break-word;color:var(--text-2,rgba(255,255,255,.55));text-align:left;font-family:monospace;cursor:pointer">…</div>`
+        : `<div class="card-thumb-icon">${fileIcon(f.orig_name)}</div>`;
     const own      = isOwn(f);
     const pwAttr   = f.has_password ? '1' : '0';
     const preBtn   = canInline(f) ? `<button class="icon-btn" data-action="preview" data-id="${esc(f.id)}" data-pw="${pwAttr}" title="Preview">👁</button>` : '';
@@ -407,6 +412,14 @@ function renderFiles() {
       <div class="card-actions">${preBtn}${dlBtn}${linkBtn}${delBtn}</div>
     </div>`;
   }).join('');
+
+  // Async-populate text-snippet thumbnails so the content is visible on the card
+  fileGrid.querySelectorAll('[data-text-id]').forEach(el => {
+    fetch(`/raw/${el.dataset.textId}`)
+      .then(r => r.ok ? r.text() : Promise.reject())
+      .then(t => { el.textContent = t.trim().slice(0, 400) || '(empty)'; })
+      .catch(() => { el.innerHTML = `<div class="card-thumb-icon">📝</div>`; });
+  });
 }
 
 function cardType(f) {
@@ -513,12 +526,15 @@ function showPreviewModal(f) {
 
   if (isText) {
     fetch(`/raw/${id}`)
-      .then(r => r.text())
+      .then(r => { if (!r.ok) throw new Error(r.status); return r.text(); })
       .then(txt => {
         const el = overlay.querySelector('#preview-text-body');
         if (el) { el.outerHTML = `<pre class="preview-text-content">${esc(txt.slice(0, 100_000))}</pre>`; }
       })
-      .catch(() => {});
+      .catch(() => {
+        const el = overlay.querySelector('#preview-text-body');
+        if (el) el.innerHTML = '<div class="preview-unavailable"><p>Could not load preview</p><p style="font-size:12px;color:var(--text-3);margin-top:6px">The file may have expired or be unavailable</p></div>';
+      });
   }
 }
 
