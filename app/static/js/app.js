@@ -20,7 +20,6 @@ const _cfg         = window.YEET_CONFIG || {};
 let   _allFiles    = [];
 let   _allBundles  = [];
 let   _clipItems   = [];
-let   _accent      = localStorage.getItem('yeet_accent') || 'cyan';
 let   _expiry      = parseInt(localStorage.getItem('yeet_expiry') || '24', 10);
 let   _pendingDlId = null;
 let   _resultUrl   = '';
@@ -67,27 +66,65 @@ const pasteSave      = document.getElementById('paste-save');
 const pasteClear     = document.getElementById('paste-clear');
 const pastePickImg   = document.getElementById('paste-pick-img');
 
-// ── Accent / settings init ────────────────────────────────────────────────────
-applyAccent(_accent);
-(function syncAccentButtons() {
-  document.querySelectorAll('[data-setting="accent"]').forEach(b => {
-    b.classList.remove('active', 'active-mono');
-    if (b.dataset.value === _accent) {
-      b.classList.add(_accent === 'mono' ? 'active-mono' : 'active');
-    }
-  });
-})();
+// ── Theme + accent system ─────────────────────────────────────────────────────
+const ACCENTS = {
+  cyan:   ['#00D4FF', '#00AACC'],
+  purple: ['#B537F2', '#8E1ED4'],
+  pink:   ['#FF2E97', '#D81B7C'],
+  green:  ['#00F5A0', '#00C97F'],
+  teal:   ['#14B8A6', '#0E8A7B'],
+  blue:   ['#4A90FF', '#2A6FE0'],
+  orange: ['#FF6B35', '#D9551E'],
+  red:    ['#FF3366', '#D6244F'],
+  yellow: ['#FFD60A', '#D9B500'],
+  // Mono follows the active theme — set dynamically in applyAccent.
+  mono:   [null, null],
+};
+
+let _theme  = localStorage.getItem('yeet_theme')  || 'auto';     // auto | light | dark
+let _accent = localStorage.getItem('yeet_accent') || 'cyan';
+
+const _mql = window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null;
+
+function effectiveTheme() {
+  if (_theme === 'auto') return _mql && _mql.matches ? 'light' : 'dark';
+  return _theme;
+}
+
+function applyTheme() {
+  document.documentElement.setAttribute('data-theme', effectiveTheme());
+  applyAccent(_accent);   // mono shifts with theme
+}
 
 function applyAccent(val) {
-  const map = {
-    cyan:   ['#00D4FF', '#00AACC'],
-    purple: ['#B537F2', '#8E1ED4'],
-    mono:   ['#FFFFFF', '#CCCCCC'],
-  };
-  const [a, h] = map[val] || map.cyan;
+  let [a, h] = ACCENTS[val] || ACCENTS.cyan;
+  if (val === 'mono') {
+    const dark = effectiveTheme() === 'dark';
+    a = dark ? '#FFFFFF' : '#1C1C28';
+    h = dark ? '#CCCCCC' : '#44445A';
+  }
   document.documentElement.style.setProperty('--accent', a);
   document.documentElement.style.setProperty('--accent-hover', h);
 }
+
+function syncSettingsButtons() {
+  document.querySelectorAll('[data-theme]').forEach(b => {
+    b.classList.toggle('active', b.dataset.theme === _theme);
+  });
+  document.querySelectorAll('[data-accent]').forEach(b => {
+    b.classList.toggle('active', b.dataset.accent === _accent);
+  });
+}
+
+// React to OS theme changes when in auto mode
+if (_mql) {
+  const onChange = () => { if (_theme === 'auto') applyTheme(); };
+  if (_mql.addEventListener) _mql.addEventListener('change', onChange);
+  else _mql.addListener(onChange);
+}
+
+applyTheme();
+syncSettingsButtons();
 
 // ── Expiry chips ──────────────────────────────────────────────────────────────
 (function initChips() {
@@ -1003,20 +1040,70 @@ if (pwSubmit) {
 }
 if (pwModalInput) pwModalInput.addEventListener('keydown', e => { if (e.key === 'Enter') pwSubmit?.click(); });
 
-// ── Settings modal ────────────────────────────────────────────────────────────
-if (settingsBtn)   settingsBtn.addEventListener('click', () => settingsModal?.classList.remove('hidden'));
-if (settingsClose) settingsClose.addEventListener('click', () => settingsModal?.classList.add('hidden'));
-if (settingsModal) settingsModal.addEventListener('click', e => { if (e.target === settingsModal) settingsModal.classList.add('hidden'); });
+// ── Settings + help modals ────────────────────────────────────────────────────
+const helpBtn       = document.getElementById('help-btn');
+const helpModal     = document.getElementById('help-modal');
+const helpClose     = document.getElementById('help-close');
+const themeRow      = document.getElementById('theme-row');
+const accentSwatches = document.getElementById('accent-swatches');
 
-document.querySelectorAll('[data-setting="accent"]').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const val = btn.dataset.value;
-    _accent = val;
-    localStorage.setItem('yeet_accent', val);
-    applyAccent(val);
-    document.querySelectorAll('[data-setting="accent"]').forEach(b => b.classList.remove('active', 'active-mono'));
-    btn.classList.add(val === 'mono' ? 'active-mono' : 'active');
+function openModal(m)  { m?.classList.remove('hidden'); }
+function closeModal(m) { m?.classList.add('hidden'); }
+
+if (settingsBtn)   settingsBtn.addEventListener('click', () => openModal(settingsModal));
+if (settingsClose) settingsClose.addEventListener('click', () => closeModal(settingsModal));
+if (settingsModal) settingsModal.addEventListener('click', e => { if (e.target === settingsModal) closeModal(settingsModal); });
+
+if (helpBtn)       helpBtn.addEventListener('click', () => openModal(helpModal));
+if (helpClose)     helpClose.addEventListener('click', () => closeModal(helpModal));
+if (helpModal)     helpModal.addEventListener('click', e => { if (e.target === helpModal) closeModal(helpModal); });
+
+// Help tabs
+document.querySelectorAll('[data-help-tab]').forEach(tab => {
+  tab.addEventListener('click', () => {
+    const name = tab.dataset.helpTab;
+    document.querySelectorAll('[data-help-tab]').forEach(t => t.classList.toggle('active', t === tab));
+    document.querySelectorAll('[data-help-pane]').forEach(p => p.classList.toggle('active', p.dataset.helpPane === name));
   });
+});
+
+// Theme picker
+if (themeRow) {
+  themeRow.addEventListener('click', e => {
+    const btn = e.target.closest('[data-theme]');
+    if (!btn) return;
+    _theme = btn.dataset.theme;
+    localStorage.setItem('yeet_theme', _theme);
+    applyTheme();
+    syncSettingsButtons();
+  });
+}
+
+// Accent swatches
+if (accentSwatches) {
+  accentSwatches.addEventListener('click', e => {
+    const btn = e.target.closest('[data-accent]');
+    if (!btn) return;
+    _accent = btn.dataset.accent;
+    localStorage.setItem('yeet_accent', _accent);
+    applyAccent(_accent);
+    syncSettingsButtons();
+  });
+}
+
+// Esc closes any open modal; ? opens help (when not typing)
+document.addEventListener('keydown', e => {
+  const a = document.activeElement;
+  const inField = a && ['INPUT', 'TEXTAREA', 'SELECT'].includes(a.tagName);
+  if (e.key === 'Escape') {
+    [settingsModal, helpModal, pasteModal, pwModal].forEach(m => {
+      if (m && !m.classList.contains('hidden')) closeModal(m);
+    });
+  }
+  if (e.key === '?' && !inField && !e.ctrlKey && !e.metaKey) {
+    e.preventDefault();
+    openModal(helpModal);
+  }
 });
 
 // ── Deleted / virus log ───────────────────────────────────────────────────────

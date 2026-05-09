@@ -31,7 +31,8 @@
       <input class="header-search-input" id="search-input" type="text" placeholder="Search files…" autocomplete="off">
     </div>
     <div class="header-right">
-      <button class="btn-ghost" id="settings-btn" title="Settings">⚙</button>
+      <button class="btn-ghost icon-only" id="help-btn" title="How to use yeet">?</button>
+      <button class="btn-ghost icon-only" id="settings-btn" title="Settings">⚙</button>
     </div>
   </header>
 
@@ -61,13 +62,148 @@
       </div>
       <div class="modal-body">
         <div class="setting-group">
-          <div class="setting-label">Accent color</div>
-          <div class="option-row">
-            <button class="opt-btn active" data-setting="accent" data-value="cyan">Cyan</button>
-            <button class="opt-btn" data-setting="accent" data-value="purple">Purple</button>
-            <button class="opt-btn" data-setting="accent" data-value="mono">Mono</button>
+          <div class="setting-label">Theme</div>
+          <div class="theme-row" id="theme-row">
+            <button class="theme-btn" data-theme="auto"  title="Match your OS"><span class="theme-ico">🖥</span><span>Auto</span></button>
+            <button class="theme-btn" data-theme="light" title="Light"><span class="theme-ico">☀</span><span>Light</span></button>
+            <button class="theme-btn" data-theme="dark"  title="Dark"><span class="theme-ico">🌙</span><span>Dark</span></button>
           </div>
         </div>
+        <div class="setting-group">
+          <div class="setting-label">Accent color</div>
+          <div class="accent-swatches" id="accent-swatches">
+            <button class="swatch" data-accent="cyan"   style="--c:#00D4FF" title="Cyan"></button>
+            <button class="swatch" data-accent="purple" style="--c:#B537F2" title="Purple"></button>
+            <button class="swatch" data-accent="pink"   style="--c:#FF2E97" title="Pink"></button>
+            <button class="swatch" data-accent="green"  style="--c:#00F5A0" title="Green"></button>
+            <button class="swatch" data-accent="teal"   style="--c:#14B8A6" title="Teal"></button>
+            <button class="swatch" data-accent="blue"   style="--c:#4A90FF" title="Blue"></button>
+            <button class="swatch" data-accent="orange" style="--c:#FF6B35" title="Orange"></button>
+            <button class="swatch" data-accent="red"    style="--c:#FF3366" title="Red"></button>
+            <button class="swatch" data-accent="yellow" style="--c:#FFD60A" title="Yellow"></button>
+            <button class="swatch swatch-mono" data-accent="mono" title="Mono"></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Help modal -->
+  <div class="modal-overlay hidden" id="help-modal" role="dialog" aria-modal="true">
+    <div class="modal-box help-modal-box">
+      <div class="modal-header">
+        <span class="modal-title">📖 yeet — how to use</span>
+        <button class="modal-close" id="help-close">✕</button>
+      </div>
+      <div class="help-tabs" role="tablist">
+        <button class="help-tab active" data-help-tab="usage" role="tab">Usage</button>
+        <button class="help-tab" data-help-tab="formats" role="tab">Formats</button>
+        <button class="help-tab" data-help-tab="changelog" role="tab">What's new</button>
+        <button class="help-tab" data-help-tab="about" role="tab">About</button>
+      </div>
+      <div class="modal-body help-body">
+
+        <!-- ── Usage ─────────────────────────────────────── -->
+        <section class="help-pane active" data-help-pane="usage">
+          <h4>The basics</h4>
+          <ul class="help-list">
+            <li><b>Drop</b> files anywhere on the upload area, or <b>click</b> to browse, or <b>paste</b> with <kbd>Ctrl</kbd>+<kbd>V</kbd>.</li>
+            <li>On a phone or tablet use the <b>📋 Paste</b>, <b>🖼 Photo</b>, and <b>📁 Folder</b> chips inside the drop zone.</li>
+            <li>Once uploaded you get a <code>/f/&lt;id&gt;</code> link copied to your clipboard automatically.</li>
+            <li>Files expire automatically. Pick <b>1h</b>, <b>24h</b>, or <b>7d</b> for each upload.</li>
+          </ul>
+
+          <h4>🔥 Burn after read</h4>
+          <p>Tick <b>Burn after read</b> to make a single-view link. The file is wiped from disk the instant someone downloads it — no archive, no second chance. Atomic claim prevents two people from racing the same link.</p>
+
+          <h4>📁 Folder uploads</h4>
+          <p>Drag a whole folder onto the drop zone, or click <b>📁 Folder</b>. You get one share link <code>/b/&lt;id&gt;</code> with a file list and a <b>Download all (.zip)</b> button. Each file is still scanned individually.</p>
+
+          <h4>📋 Public clipboard</h4>
+          <p>The <b>Public clipboard</b> panel on the home page is a global feed — every visitor sees every recent paste. Items you posted are tinted green and tagged <b>YOU</b>; only you can pin or delete them. <b>Don't put secrets in there.</b></p>
+
+          <h4>🔒 Password protection</h4>
+          <p>Type a password into the lock field before uploading. Recipients enter it to unlock the download. Passwords are hashed with bcrypt — yeet never stores the raw value.</p>
+
+          <h4>🤖 CLI</h4>
+          <pre class="help-code">yeet upload photo.jpg
+yeet upload secret.pdf --password hunter2
+yeet upload one-shot.zip --burn
+
+# Plain-text URL — handy for piping
+curl -F f=@build.log https://yeet.majmohar.eu/raw</pre>
+        </section>
+
+        <!-- ── Formats ─────────────────────────────────── -->
+        <section class="help-pane" data-help-pane="formats">
+          <h4>What you can upload</h4>
+          <p>The check is permissive: ~1000 named extensions across every common category, plus a fallback that accepts any reasonable extension shape. Files without an extension also work.</p>
+
+          <div class="help-format-grid">
+            <div><b>Images</b><span>jpg png webp avif heic gif tif raw (cr2/nef/dng/arw…)</span></div>
+            <div><b>Documents</b><span>pdf docx odt rtf md tex epub mobi azw3</span></div>
+            <div><b>Spreadsheets</b><span>xlsx xls ods csv tsv numbers parquet feather</span></div>
+            <div><b>Audio</b><span>mp3 flac wav opus m4a aac midi mod sf2</span></div>
+            <div><b>Video</b><span>mp4 mov mkv webm avi wmv mxf 3gp</span></div>
+            <div><b>Archives</b><span>zip 7z tar gz xz zst rar jar dmg iso</span></div>
+            <div><b>Code &amp; data</b><span>py js ts go rs c cpp java rb php sql</span></div>
+            <div><b>3D / CAD</b><span>stl obj fbx blend dwg dxf step gltf</span></div>
+            <div><b>Game / mods</b><span>esp esm pak nbt schematic mcfunction nes gba</span></div>
+            <div><b>GIS</b><span>geojson kml gpx shp las pbf gpkg</span></div>
+            <div><b>Fonts</b><span>ttf otf woff woff2 eot</span></div>
+            <div><b>Crypto / certs</b><span>pem crt csr p12 pfx asc gpg</span></div>
+          </div>
+
+          <h4>⚠ Executables (allowed but flagged)</h4>
+          <p>Windows <code>.exe .msi .dll .bat .ps1 .vbs</code>, Unix <code>.sh .so .deb .rpm</code>, macOS <code>.dmg .app</code>, Java <code>.jar</code> — all upload fine and get a ⚠ badge. Inline previews are refused; only the <code>/f/</code> download path serves them and always as an attachment.</p>
+
+          <h4>📄 HTML / SVG / JS</h4>
+          <p>Accepted, but yeet shows them as plain text — no rendering, no script execution, no fake-login phishing. If you want the rendered version, download and open locally.</p>
+
+          <p class="help-foot"><a href="/static/FORMATS.md" onclick="this.href='https://github.com/majmohar4/yeet/blob/main/FORMATS.md'; return true">Full categorized list →</a></p>
+        </section>
+
+        <!-- ── Changelog ───────────────────────────────── -->
+        <section class="help-pane" data-help-pane="changelog">
+          <div class="help-version">
+            <h4>1.1.0 <span class="help-version-date">2026-05-09</span></h4>
+            <ul class="help-list">
+              <li><b>Folder uploads</b> — drag a folder, share at <code>/b/&lt;id&gt;</code>, stream a <code>.zip</code> of the whole tree.</li>
+              <li><b>🔥 Burn after read</b> — atomic single-view links, deletes from disk on first download.</li>
+              <li><b>Public clipboard</b> — global feed of recent pastes, sneak-peek panel open by default, owner-only pin/delete.</li>
+              <li><b>Mobile + tablet</b> — quick <b>📋 Paste</b>, <b>🖼 Photo</b>, <b>📁 Folder</b> chips with clipboard-API + manual fallback. Fully responsive down to 480 px.</li>
+              <li><b>POST /raw</b> — curl-friendly upload returning the URL on stdout.</li>
+              <li><b>~1000 extensions</b> + permissive fallback. Executables flagged ⚠, HTML/SVG/JS served as source-only.</li>
+              <li><b>Theme system</b> — light / dark / auto + expanded accent palette.</li>
+            </ul>
+          </div>
+          <div class="help-version">
+            <h4>1.0.0 <span class="help-version-date">2025-06-01</span></h4>
+            <ul class="help-list">
+              <li>Initial release — file upload, expiry, password protection, ClamAV scanning, rate limits, bypass codes, admin panel.</li>
+            </ul>
+          </div>
+          <p class="help-foot"><a href="https://github.com/majmohar4/yeet/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Full changelog on GitHub →</a></p>
+        </section>
+
+        <!-- ── About ───────────────────────────────────── -->
+        <section class="help-pane" data-help-pane="about">
+          <p>yeet is a minimal, secure file-sharing server. No accounts, no tracking, no analytics. Files expire automatically and are scanned by ClamAV before they hit disk.</p>
+          <ul class="help-list">
+            <li><b>Source code:</b> <a href="https://github.com/majmohar4/yeet" target="_blank" rel="noopener">github.com/majmohar4/yeet</a></li>
+            <li><b>License:</b> MIT</li>
+            <li><b>Abuse / DMCA:</b> <a href="mailto:info@majmohar.eu">info@majmohar.eu</a></li>
+            <li><b>Stack:</b> FastAPI + SQLite + ClamAV, Docker.</li>
+          </ul>
+          <h4>Keyboard shortcuts</h4>
+          <ul class="help-list">
+            <li><kbd>Ctrl</kbd>+<kbd>V</kbd> on the page — paste text or image into the clipboard manager</li>
+            <li><kbd>Shift</kbd>+<kbd>Ctrl</kbd>+<kbd>V</kbd> — paste image as a regular file upload</li>
+            <li><kbd>Esc</kbd> — close any open modal</li>
+            <li><kbd>?</kbd> — open this help</li>
+          </ul>
+        </section>
+
       </div>
     </div>
   </div>
