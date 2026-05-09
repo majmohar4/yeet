@@ -353,7 +353,7 @@ def cmd_health(_args):
 
 def cmd_upload(args):
     """Upload a file via HTTP API.
-    Usage: yeet upload <file> [--password <pw>] [--max-downloads <n>] [--bypass-code <code>]
+    Usage: yeet upload <file> [--password <pw>] [--max-downloads <n>] [--bypass-code <code>] [--burn]
     """
     import mimetypes
 
@@ -361,16 +361,18 @@ def cmd_upload(args):
     password  = ""
     max_dl    = ""
     bypass    = ""
+    burn      = False
 
     it = iter(args)
     for a in it:
-        if a in ("--password", "-p"):       password = next(it, "")
-        elif a in ("--max-downloads", "-m"): max_dl  = next(it, "")
-        elif a in ("--bypass-code", "-b"):   bypass  = next(it, "")
+        if a in ("--password", "-p"):        password = next(it, "")
+        elif a in ("--max-downloads", "-m"): max_dl   = next(it, "")
+        elif a in ("--bypass-code", "-b"):   bypass   = next(it, "")
+        elif a in ("--burn",):               burn     = True
         else:                                file_path = a
 
     if not file_path:
-        err("Usage: yeet upload <file> [--password <pw>] [--max-downloads <n>] [--bypass-code <code>]")
+        err("Usage: yeet upload <file> [--password <pw>] [--max-downloads <n>] [--bypass-code <code>] [--burn]")
     if not Path(file_path).exists():
         err(f"File not found: {file_path}")
 
@@ -390,6 +392,8 @@ def cmd_upload(args):
     body_parts.append(_field("password", password))
     body_parts.append(_field("max_downloads", max_dl))
     body_parts.append(_field("bypass_code", bypass))
+    if burn:
+        body_parts.append(_field("burn", "1"))
 
     file_bytes = Path(file_path).read_bytes()
     mime = mimetypes.guess_type(file_path)[0] or "application/octet-stream"

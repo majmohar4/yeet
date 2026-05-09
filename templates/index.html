@@ -11,7 +11,25 @@
   <div class="dz-prompt" id="dz-prompt">
     <span class="dz-icon">⬆</span>
     <div class="dz-title">Drop files, or <span class="accent">click to browse</span></div>
-    <div class="dz-sub">Paste Ctrl+V anywhere &middot; {{ max_file_mb }}MB max</div>
+    <div class="dz-sub">
+      <span class="dz-sub-desktop">Paste <kbd>Ctrl</kbd>+<kbd>V</kbd> anywhere</span>
+      <span class="dz-sub-mobile">Tap below to paste text or pick an image</span>
+      &middot; {{ max_file_mb }}MB max
+    </div>
+    <div class="dz-quick-actions">
+      <button type="button" class="dz-quick-btn" id="quick-paste" title="Paste text or image">
+        <span class="dz-quick-ico">📋</span>
+        <span class="dz-quick-lbl">Paste</span>
+      </button>
+      <button type="button" class="dz-quick-btn" id="quick-photo" title="Pick from camera or photo library">
+        <span class="dz-quick-ico">🖼</span>
+        <span class="dz-quick-lbl">Photo</span>
+      </button>
+      <button type="button" class="dz-quick-btn" id="quick-folder" title="Upload a folder">
+        <span class="dz-quick-ico">📁</span>
+        <span class="dz-quick-lbl">Folder</span>
+      </button>
+    </div>
   </div>
 
   <div class="dz-controls" id="dz-controls">
@@ -26,10 +44,35 @@
         <button class="chip" data-hours="24">24h</button>
         <button class="chip" data-hours="168">7d</button>
       </div>
+      <label class="dz-burn-toggle" title="Delete the file after the first download">
+        <input type="checkbox" id="dz-burn">
+        <span>🔥 Burn after read</span>
+      </label>
     </div>
   </div>
 </div>
 <input type="file" id="file-input" multiple hidden>
+<input type="file" id="photo-input" accept="image/*" capture="environment" hidden>
+
+<!-- ── Paste modal (mobile/tablet helper) ────────────────── -->
+<div class="modal-overlay hidden" id="paste-modal" role="dialog" aria-modal="true">
+  <div class="modal-box">
+    <div class="modal-header">
+      <span class="modal-title">📋 Paste here</span>
+      <button class="modal-close" id="paste-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <p class="paste-help">Long-press the box below and pick <b>Paste</b>, or just type. Pasting an image works too on most browsers.</p>
+      <textarea class="paste-textarea" id="paste-textarea" rows="6" placeholder="Tap and hold here, then choose Paste…" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
+      <div class="paste-modal-actions">
+        <button class="btn-ghost" id="paste-clear" type="button">Clear</button>
+        <button class="btn-primary" id="paste-save" type="button">Save text</button>
+      </div>
+      <div class="paste-modal-divider">or</div>
+      <button class="btn-ghost paste-pick-img" id="paste-pick-img" type="button">📷 Pick image instead</button>
+    </div>
+  </div>
+</div>
 
 <!-- ── Active uploads ────────────────────────────────────── -->
 <div class="active-uploads" id="active-uploads" style="display:none"></div>
@@ -41,6 +84,20 @@
   <button class="upload-result-copy" id="upload-result-copy" onclick="copyResult()">copy</button>
   <button class="upload-result-dismiss" onclick="dismissResult()" title="Dismiss">×</button>
 </div>
+
+<!-- ── Clipboard panel (public feed) ─────────────────────── -->
+<details class="clipboard-panel" id="clipboard-panel" open>
+  <summary>
+    📋 Public clipboard
+    <span class="clipboard-count" id="clipboard-count">0</span>
+    <span class="clipboard-hint">— recent pastes from everyone</span>
+  </summary>
+  <div class="clipboard-empty hidden" id="clipboard-empty">
+    No pastes yet. Press <kbd>Ctrl</kbd>+<kbd>V</kbd> or tap <b>📋 Paste</b> above to add the first one.
+  </div>
+  <div class="clipboard-list" id="clipboard-list"></div>
+  <div class="clipboard-foot">Anyone can read these items. Only you can pin or delete the ones you posted.</div>
+</details>
 
 <!-- ── File grid ─────────────────────────────────────────── -->
 <div class="section-header">
@@ -57,6 +114,8 @@
     </select>
   </div>
 </div>
+
+<input type="file" id="folder-input" webkitdirectory directory multiple hidden>
 
 <div class="file-grid" id="file-grid"></div>
 
@@ -75,10 +134,10 @@
     <div class="privacy-col">
       <h5>What we collect</h5>
       <ul>
-        <li>Files you upload (stored on our servers)</li>
+        <li>Files, folders, and clipboard items you upload — stored on our servers</li>
         <li>IP addresses (rate limiting &amp; abuse prevention)</li>
         <li>Upload timestamps and file metadata</li>
-        <li>Browser session ID stored in localStorage (for delete permissions)</li>
+        <li>Browser session ID stored in localStorage (for delete/pin permissions)</li>
       </ul>
       <h5>What we don't collect</h5>
       <ul>
@@ -91,8 +150,10 @@
       <ul>
         <li>All connections encrypted via HTTPS</li>
         <li>Virus scanning on every upload (ClamAV)</li>
-        <li>Rate limiting to prevent abuse</li>
+        <li>Rate limiting + per-IP daily upload bandwidth cap</li>
         <li>Password hashing with bcrypt (we never see your passwords)</li>
+        <li>HTML/SVG/JS uploads can never render or execute through this site — they are served as source text. Executables are download-only.</li>
+        <li>🔥 Burn-after-read files are wiped from disk the instant they are served</li>
       </ul>
     </div>
     <div class="privacy-col">
@@ -100,13 +161,20 @@
       <ul>
         <li>Files expire after your chosen time (1h – 7d)</li>
         <li>Expired files archived for 24h (server access only), then permanently deleted</li>
+        <li>Burn-after-read files skip the archive — gone immediately on first download</li>
         <li>Audit logs retained for 90 days for abuse investigation</li>
         <li>IP-based rate limit entries deleted after 2 hours</li>
       </ul>
+      <h5>Public clipboard ⚠</h5>
+      <ul>
+        <li>The 📋 <b>Public clipboard</b> panel is global — every visitor sees every non-expired paste</li>
+        <li>Don't put secrets, credentials, or personal data in there</li>
+        <li>Only you can pin or delete the items you posted (verified via your browser session)</li>
+      </ul>
       <h5>Your rights</h5>
       <ul>
-        <li>Delete your own files anytime from the session you uploaded them</li>
-        <li>All files automatically deleted after expiry — no residual copies</li>
+        <li>Delete your own files and clipboard items anytime from the session you uploaded them</li>
+        <li>Everything auto-deletes after expiry — no residual copies</li>
         <li>No account needed; nothing tied to your identity</li>
       </ul>
       <h5>Abuse &amp; DMCA</h5>

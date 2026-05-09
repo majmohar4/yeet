@@ -7,7 +7,17 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from app.database import get_db
+from app.routes.upload import EXECUTABLE_EXTENSIONS, WEB_RENDERABLE_EXTENSIONS
 from app.services.storage import archive_file
+
+
+def _annotate_dangerous(rows: list[dict]) -> list[dict]:
+    for r in rows:
+        name = (r.get("orig_name") or "").lower()
+        ext = "." + name.rsplit(".", 1)[-1] if "." in name else ""
+        r["dangerous"] = ext in EXECUTABLE_EXTENSIONS
+        r["web_renderable"] = ext in WEB_RENDERABLE_EXTENSIONS
+    return rows
 
 router = APIRouter()
 
@@ -20,19 +30,36 @@ def _safe_id(file_id: str) -> str | None:
 
 @router.get("/api/files/all")
 async def get_all_files():
-    """Return all active (non-archived, non-expired) files, newest first."""
+    """Return active loose files + bundles (folders), newest first.
+
+    Files that belong to a bundle are hidden from this listing — they show up
+    inside the bundle's /b/{id} view instead.
+    """
     db = await get_db()
     now = datetime.now(timezone.utc).isoformat()
     async with db.execute(
         "SELECT id, orig_name, file_size, mime_type, created_at, expires_at, "
         "download_count, max_downloads, scan_status, uploader_session, "
+        "burn_after_read, claimed_at, "
         "(password_hash IS NOT NULL) as has_password "
         "FROM files WHERE archived_at IS NULL AND expires_at > ? "
+        "AND bundle_id IS NULL "
         "ORDER BY created_at DESC",
         (now,),
     ) as cursor:
-        rows = [dict(r) for r in await cursor.fetchall()]
-    return JSONResponse({"files": rows})
+        files_rows = _annotate_dangerous([dict(r) for r in await cursor.fetchall()])
+
+    async with db.execute(
+        "SELECT id, name, file_count, total_size, created_at, expires_at, "
+        "download_count, uploader_session, "
+        "(password_hash IS NOT NULL) AS has_password "
+        "FROM bundles WHERE archived_at IS NULL AND expires_at > ? "
+        "ORDER BY created_at DESC",
+        (now,),
+    ) as cursor:
+        bundle_rows = [dict(r) for r in await cursor.fetchall()]
+
+    return JSONResponse({"files": files_rows, "bundles": bundle_rows})
 
 
 @router.delete("/api/files/{file_id}")

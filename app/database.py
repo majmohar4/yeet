@@ -89,13 +89,41 @@ async def init_db() -> None:
 
         CREATE INDEX IF NOT EXISTS idx_clipboard_expires ON clipboard_items(expires_at);
         CREATE INDEX IF NOT EXISTS idx_clipboard_session ON clipboard_items(session_id, created_at);
+
+        -- Bundles: a folder of files uploaded under a single share URL (/b/{id})
+        CREATE TABLE IF NOT EXISTS bundles (
+            id          TEXT PRIMARY KEY,
+            name        TEXT NOT NULL,
+            password_hash TEXT,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            expires_at  TEXT NOT NULL,
+            archived_at TEXT,
+            download_count INTEGER NOT NULL DEFAULT 0,
+            file_count  INTEGER NOT NULL DEFAULT 0,
+            total_size  INTEGER NOT NULL DEFAULT 0,
+            client_ip   TEXT,
+            uploader_session TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_bundles_expires ON bundles(expires_at);
+        CREATE INDEX IF NOT EXISTS idx_bundles_session ON bundles(uploader_session, created_at);
     """)
-    # Migration: add uploader_session column to existing databases
+    # Idempotent migrations for existing databases
+    for stmt in (
+        "ALTER TABLE files ADD COLUMN uploader_session TEXT",
+        "ALTER TABLE files ADD COLUMN bundle_id TEXT",
+        "ALTER TABLE files ADD COLUMN bundle_path TEXT",
+        "ALTER TABLE files ADD COLUMN burn_after_read INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE files ADD COLUMN claimed_at TEXT",
+    ):
+        try:
+            await db.execute(stmt)
+        except Exception:
+            pass
     try:
-        await db.execute("ALTER TABLE files ADD COLUMN uploader_session TEXT")
-        await db.commit()
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_files_bundle ON files(bundle_id)")
     except Exception:
-        pass  # column already exists
+        pass
     await db.commit()
 
 

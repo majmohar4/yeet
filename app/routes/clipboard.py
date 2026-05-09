@@ -154,21 +154,31 @@ async def get_clipboard_image(item_id: str):
 
 
 @router.get("/api/clipboard/recent")
-async def get_recent_clipboard(request: Request, limit: int = 20):
+async def get_recent_clipboard(request: Request, limit: int = 30):
+    """
+    Public feed: returns the most recent non-expired clipboard items from
+    everyone. The caller's session_id (X-Session-ID header) is used only to
+    annotate which items are theirs (`is_yours`), so the UI can show
+    pin/delete on owned rows. Other users' session ids are never returned.
+    """
     session_id = request.headers.get("X-Session-ID", "").strip()
-    if not session_id:
-        return JSONResponse({"items": []})
-    limit = max(1, min(limit, 50))
+    limit = max(1, min(limit, 100))
     db = await get_db()
     now = datetime.now(timezone.utc).isoformat()
     async with db.execute(
-        "SELECT id,type,preview,encrypted,pinned,created_at,expires_at "
-        "FROM clipboard_items WHERE session_id=? AND (pinned=1 OR expires_at > ?) "
-        "ORDER BY created_at DESC LIMIT ?",
-        (session_id, now, limit),
+        "SELECT id,type,preview,encrypted,pinned,created_at,expires_at,session_id "
+        "FROM clipboard_items WHERE pinned=1 OR expires_at > ? "
+        "ORDER BY pinned DESC, created_at DESC LIMIT ?",
+        (now, limit),
     ) as cur:
         rows = [dict(r) for r in await cur.fetchall()]
-    return JSONResponse({"items": rows})
+
+    out = []
+    for r in rows:
+        owner = r.pop("session_id", None) or ""
+        r["is_yours"] = bool(session_id) and owner == session_id
+        out.append(r)
+    return JSONResponse({"items": out})
 
 
 @router.post("/api/clipboard/pin/{item_id}")

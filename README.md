@@ -14,19 +14,47 @@ $ yeet upload photo.jpg
   Scan:     clean
 ```
 
+For a hands-on walkthrough of every feature see **[USAGE.md](USAGE.md)**, the full file-format catalog is in **[FORMATS.md](FORMATS.md)**, and the security/threat model is in **[SECURITY.md](SECURITY.md)**.
+
 ## Features
 
-- Files expire automatically (default: 24 hours, configurable)
-- Optional password protection (bcrypt)
-- Optional per-file download limit
-- ClamAV virus scanning — infected files are rejected and logged
-- **Byte-based rate limiting** — 1GB/day per IP (scales with file size limit)
-- **Bypass codes** — single-use codes that skip all limits (CLI: `yeet generate-code`)
-- **Concurrent upload limit** — max 2 simultaneous uploads per IP
+**Sharing**
+- Single files (`/f/<id>`), folders / multi-file bundles (`/b/<id>`), and quick text/image clipboard items (`/c/<id>`)
+- Files expire automatically (default: 24 hours, configurable per upload — 1 h / 24 h / 7 d)
+- Optional **🔥 burn after read** — file is wiped from disk the moment it's served (atomic, race-free)
+- Optional password protection (bcrypt) and per-file download limit
+- Public clipboard panel — recent text/image pastes from everyone; pin/delete remain owner-only
+- Folder uploads scan each member individually, expose a single share URL, and offer a streaming `.zip` download
+
+**Mobile + tablet**
+- Quick **📋 Paste**, **🖼 Photo**, **📁 Folder** buttons in the drop zone (no Ctrl-V required)
+- Camera capture and clipboard-API integration; manual paste textarea fallback
+- Fully responsive layout, ≥44 px tap targets, `pointer: coarse` adaptations
+
+**Security**
+- ClamAV virus scanning on every upload — infected files rejected and logged
+- `/raw/<id>` neutralizes web-renderable types (HTML/SVG/JS/WASM served as plain-text source) and refuses executables outright
+- All `/f/<id>` downloads forced via `Content-Disposition: attachment` + `nosniff`
+- Strict Content-Security-Policy on all asset paths
+- Honeypot field rejects most upload bots silently
+- Audit log for every upload, download, deletion, virus hit, and admin action
+
+**Limits**
+- Byte-based rate limiting — 1 GB/day per IP, scales up with file size limit
+- Concurrent upload limit (max 2 simultaneous per IP)
 - Storage cap with 80% warning and 90% block
+- **Bypass codes** — single-use codes that skip all upload limits (`yeet generate-code`)
+
+**Files / file types**
+- ~1000 explicitly supported extensions across docs, media, RAW, scientific, GIS, 3D/CAD, fonts, e-books, archives, source code (see [FORMATS.md](FORMATS.md))
+- Permissive fallback — any extension shape passes (`^\.[a-z0-9_+-]{1,12}$`)
+- ⚠ executable badge on `.exe`/`.dll`/`.deb`/`.dmg`/`.sh`/etc. so downloaders know what they're getting
+
+**Daily-driver UX**
+- Drag-and-drop with progress bar
 - Search and filter your recent uploads on the main page
 - Collapsed "recently deleted" section shows virus scanner activity
-- Audit log for all actions
+- `POST /raw` for `curl -F f=@thing.txt $YEET/raw` — returns the URL on stdout
 - No JavaScript required to download
 - Admin panel (HTTP Basic Auth)
 - Zero third-party analytics
@@ -177,9 +205,17 @@ Admin (direct DB access — run via docker exec):
   cleanup                   Archive expired files now
 
 HTTP (uses YEET_URL):
-  upload <file> [--password <pw>] [--max-downloads <n>] [--bypass-code <code>]
+  upload <file> [--password <pw>] [--max-downloads <n>] [--bypass-code <code>] [--burn]
   download <url> [--output <path>] [--password <pw>]
   health
+```
+
+For one-liners that don't need JSON:
+
+```bash
+# Upload, get URL on stdout
+curl -F f=@build.log https://yeet.majmohar.eu/raw
+# → https://yeet.majmohar.eu/f/abc123…
 ```
 
 ### Examples
@@ -269,11 +305,11 @@ curl -u admin:pass -X POST https://yeet.example.com/admin/cleanup
 
 1. File is uploaded and read into memory
 2. ClamAV scans the bytes (if enabled)
-3. File is saved to `/data/uploads/<uuid>` with no extension
-4. Metadata (filename, hash, expiry, password hash) is stored in SQLite
-5. A link is returned — `/f/<32-char-hex-id>`
-6. Background task checks every 15 minutes and moves expired files to `/data/archive/`
-7. Files are never deleted from archive automatically (manual cleanup or `yeet cleanup`)
+3. File is saved to `/data/uploads/<uuid>` with no extension on disk — nothing yeet stores can be executed
+4. Metadata (filename, hash, expiry, password hash, dangerous/burn flags) is stored in SQLite
+5. A link is returned — `/f/<32-char-hex-id>` for files, `/b/<id>` for folder bundles, `/c/<id>` for clipboard items
+6. Background task checks every 15 minutes: expired files move to `/data/archive/`, files archived more than 24 h ago are permanently deleted
+7. **Burn-after-read** files skip the archive — they are wiped from disk the moment they are served (single atomic claim prevents double-serves)
 
 ---
 
@@ -288,6 +324,15 @@ curl -u admin:pass -X POST https://yeet.example.com/admin/cleanup
 See [FAQ.md](FAQ.md) for more common questions.
 
 ---
+
+## Documentation
+
+- **[USAGE.md](USAGE.md)** — feature-by-feature walkthrough (mobile paste, folder uploads, burn-after-read, clipboard, bypass codes, troubleshooting)
+- **[FORMATS.md](FORMATS.md)** — full categorized list of supported file extensions
+- **[SECURITY.md](SECURITY.md)** — threat model, defence-in-depth controls, vulnerability reporting
+- **[CHANGELOG.md](CHANGELOG.md)** — what shipped when
+- **[FAQ.md](FAQ.md)** — operations questions (backups, ClamAV, rate limits, …)
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — development setup and code style
 
 ## License
 

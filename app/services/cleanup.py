@@ -37,6 +37,19 @@ async def run_cleanup() -> dict:
         archived += 1
         logger.info("archived file %s", fid)
 
+    # Archive expired bundle envelopes (member files are archived above via
+    # their own expires_at, since we set both equal at upload time).
+    await db.execute(
+        "UPDATE bundles SET archived_at=? "
+        "WHERE expires_at <= ? AND archived_at IS NULL",
+        (now, now),
+    )
+    # Permanently delete bundle envelopes archived > 24h ago
+    await db.execute(
+        "DELETE FROM bundles WHERE archived_at IS NOT NULL "
+        "AND archived_at <= datetime('now', '-24 hours')"
+    )
+
     # Stage 2: permanently delete files archived > 24h ago
     async with db.execute(
         "SELECT id FROM files WHERE archived_at IS NOT NULL "

@@ -13,7 +13,7 @@ from app.config import settings
 from app.database import close_db, init_db
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.security import SecurityHeadersMiddleware
-from app.routes import admin, clipboard, download, files, upload
+from app.routes import admin, bundles, clipboard, download, files, upload
 from app.services.cleanup import cleanup_loop
 
 load_dotenv()
@@ -66,6 +66,7 @@ app.include_router(download.router)
 app.include_router(files.router)
 app.include_router(admin.router)
 app.include_router(clipboard.router)
+app.include_router(bundles.router)
 
 
 @app.get("/c/{item_id}/raw")

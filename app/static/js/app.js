@@ -18,6 +18,8 @@ getSession();
 // ── State ─────────────────────────────────────────────────────────────────────
 const _cfg         = window.YEET_CONFIG || {};
 let   _allFiles    = [];
+let   _allBundles  = [];
+let   _clipItems   = [];
 let   _accent      = localStorage.getItem('yeet_accent') || 'cyan';
 let   _expiry      = parseInt(localStorage.getItem('yeet_expiry') || '24', 10);
 let   _pendingDlId = null;
@@ -48,6 +50,22 @@ const pwSubmit       = document.getElementById('pw-submit');
 const pwError        = document.getElementById('pw-error');
 const toastContainer = document.getElementById('toast-container');
 const fabBtn         = document.getElementById('fab-btn');
+const folderInput    = document.getElementById('folder-input');
+const photoInput     = document.getElementById('photo-input');
+const clipboardPanel = document.getElementById('clipboard-panel');
+const clipboardList  = document.getElementById('clipboard-list');
+const clipboardCount = document.getElementById('clipboard-count');
+const clipboardEmpty = document.getElementById('clipboard-empty');
+const dzBurn         = document.getElementById('dz-burn');
+const quickPaste     = document.getElementById('quick-paste');
+const quickPhoto     = document.getElementById('quick-photo');
+const quickFolder    = document.getElementById('quick-folder');
+const pasteModal     = document.getElementById('paste-modal');
+const pasteClose     = document.getElementById('paste-close');
+const pasteTextarea  = document.getElementById('paste-textarea');
+const pasteSave      = document.getElementById('paste-save');
+const pasteClear     = document.getElementById('paste-clear');
+const pastePickImg   = document.getElementById('paste-pick-img');
 
 // ── Accent / settings init ────────────────────────────────────────────────────
 applyAccent(_accent);
@@ -131,26 +149,33 @@ if (dropZone) {
   dropZone.addEventListener('drop', async e => {
     e.preventDefault(); dropZone.classList.remove('drag-over');
 
-    const files = [];
-    let hadFolder = false;
+    const looseFiles = [];
+    const folderEntries = [];
     if (e.dataTransfer.items) {
       for (const item of Array.from(e.dataTransfer.items)) {
         if (item.kind !== 'file') continue;
         const entry = typeof item.webkitGetAsEntry === 'function' ? item.webkitGetAsEntry() : null;
-        if (entry && entry.isDirectory) { hadFolder = true; continue; }
+        if (entry && entry.isDirectory) { folderEntries.push(entry); continue; }
         const f = item.getAsFile();
         if (!f) continue;
-        if (!(await _probeReadable(f))) { hadFolder = true; continue; }
-        files.push(f);
+        if (!(await _probeReadable(f))) continue;
+        looseFiles.push(f);
       }
     } else {
       for (const f of Array.from(e.dataTransfer.files)) {
-        if (!(await _probeReadable(f))) { hadFolder = true; continue; }
-        files.push(f);
+        if (!(await _probeReadable(f))) continue;
+        looseFiles.push(f);
       }
     }
-    if (hadFolder) toast('Folder upload is not supported — drop individual files', 'warn');
-    if (files.length) await uploadFiles(files);
+
+    // Folders → bundle uploads
+    for (const entry of folderEntries) {
+      const collected = await _walkDirectory(entry, entry.name);
+      if (collected.length) await uploadBundle(collected, entry.name);
+      else toast('Empty folder — nothing to upload', 'warn');
+    }
+
+    if (looseFiles.length) await uploadFiles(looseFiles);
   });
 }
 
@@ -173,12 +198,17 @@ document.addEventListener('paste', async e => {
   e.preventDefault();
   const items = Array.from(e.clipboardData.items);
 
-  // Image → upload as file
+  // Image → save as clipboard image (lives in the clipboard manager).
+  // Hold Shift when pasting to upload as a regular file instead.
   const imgItem = items.find(i => i.type.startsWith('image/'));
   if (imgItem) {
     const blob = imgItem.getAsFile();
     const ext  = imgItem.type.split('/')[1] || 'png';
-    await uploadFiles([new File([blob], `pasted-image.${ext}`, { type: imgItem.type })]);
+    if (e.shiftKey) {
+      await uploadFiles([new File([blob], `pasted-image.${ext}`, { type: imgItem.type })]);
+    } else {
+      await saveClipboardImage(blob, imgItem.type);
+    }
     return;
   }
 
@@ -191,6 +221,42 @@ document.addEventListener('paste', async e => {
     await saveClipboardSnippet(text);
   }
 });
+
+async function saveClipboardImage(blob, mime) {
+  try {
+    const dataUrl = await new Promise((res, rej) => {
+      const fr = new FileReader();
+      fr.onload  = () => res(fr.result);
+      fr.onerror = () => rej(fr.error);
+      fr.readAsDataURL(blob);
+    });
+    const expiryMinutes = _expiry * 60;
+    const r = await fetch('/api/clipboard/paste', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content_type: 'image',
+        content: dataUrl,
+        expiry_minutes: expiryMinutes,
+        session_id: getSession(),
+      }),
+    });
+    const data = await r.json();
+    if (r.status === 201) {
+      _resultUrl = data.share_url;
+      if (resultUrlEl) resultUrlEl.textContent = data.share_url;
+      if (uploadResult) uploadResult.classList.remove('hidden');
+      navigator.clipboard.writeText(data.share_url).catch(() => {});
+      toast('Image saved — link copied! (Shift+V to upload as file)', 'success');
+      if (clipboardPanel) clipboardPanel.open = true;
+      await loadClipboardItems();
+    } else {
+      toast(data.error || 'Failed to save image', 'error');
+    }
+  } catch {
+    toast('Failed to save clipboard image', 'error');
+  }
+}
 
 async function saveClipboardSnippet(text) {
   try {
@@ -212,12 +278,203 @@ async function saveClipboardSnippet(text) {
       if (uploadResult) uploadResult.classList.remove('hidden');
       navigator.clipboard.writeText(data.share_url).catch(() => {});
       toast('Text saved — link copied!', 'success');
+      if (clipboardPanel) clipboardPanel.open = true;
+      await loadClipboardItems();
     } else {
       toast(data.error || 'Failed to save text', 'error');
     }
   } catch {
     toast('Failed to save clipboard text', 'error');
   }
+}
+
+// ── Folder upload ─────────────────────────────────────────────────────────────
+if (quickFolder && folderInput) {
+  quickFolder.addEventListener('click', e => {
+    e.stopPropagation();
+    folderInput.click();
+  });
+}
+if (folderInput) {
+  folderInput.addEventListener('change', async () => {
+    const files = Array.from(folderInput.files);
+    folderInput.value = '';
+    if (!files.length) return;
+    // The browser provides webkitRelativePath ("root/sub/file.txt") for folder
+    // selections — that becomes our bundle path.
+    const collected = files.map(f => ({
+      file: f,
+      path: f.webkitRelativePath || f.name,
+    }));
+    const root = (collected[0].path.split('/')[0]) || 'folder';
+    await uploadBundle(collected, root);
+  });
+}
+
+// ── Photo picker (camera or photo library) ────────────────────────────────────
+if (quickPhoto && photoInput) {
+  quickPhoto.addEventListener('click', e => {
+    e.stopPropagation();
+    photoInput.click();
+  });
+  photoInput.addEventListener('change', async () => {
+    const files = Array.from(photoInput.files);
+    photoInput.value = '';
+    if (!files.length) return;
+    // Single image → save as clipboard image so it lives in the manager.
+    const f = files[0];
+    if (f.type && f.type.startsWith('image/')) {
+      await saveClipboardImage(f, f.type);
+    } else {
+      await uploadFiles(files);
+    }
+  });
+}
+
+// ── Paste modal (mobile/tablet helper) ────────────────────────────────────────
+function openPasteModal() {
+  if (!pasteModal) return;
+  pasteModal.classList.remove('hidden');
+  setTimeout(() => pasteTextarea?.focus(), 60);
+  // Try the async clipboard API first — works on https origins after a user
+  // gesture, even on Android Chrome and iOS 14+ Safari.
+  tryPrefillFromClipboard();
+}
+function closePasteModal() {
+  if (!pasteModal) return;
+  pasteModal.classList.add('hidden');
+  if (pasteTextarea) pasteTextarea.value = '';
+}
+
+async function tryPrefillFromClipboard() {
+  if (!navigator.clipboard) return;
+  // Prefer rich (image) clipboard when available
+  if (navigator.clipboard.read) {
+    try {
+      const items = await navigator.clipboard.read();
+      for (const it of items) {
+        const imgType = it.types.find(t => t.startsWith('image/'));
+        if (imgType) {
+          const blob = await it.getType(imgType);
+          closePasteModal();
+          await saveClipboardImage(blob, imgType);
+          return;
+        }
+      }
+    } catch { /* fall through to text */ }
+  }
+  if (navigator.clipboard.readText) {
+    try {
+      const txt = await navigator.clipboard.readText();
+      if (txt && pasteTextarea) {
+        pasteTextarea.value = txt;
+      }
+    } catch { /* user denied / not allowed */ }
+  }
+}
+
+if (quickPaste) {
+  quickPaste.addEventListener('click', e => {
+    e.stopPropagation();
+    openPasteModal();
+  });
+}
+if (pasteClose)  pasteClose.addEventListener('click', closePasteModal);
+if (pasteModal)  pasteModal.addEventListener('click', e => { if (e.target === pasteModal) closePasteModal(); });
+if (pasteClear)  pasteClear.addEventListener('click', () => { if (pasteTextarea) pasteTextarea.value = ''; pasteTextarea?.focus(); });
+if (pastePickImg) pastePickImg.addEventListener('click', () => { closePasteModal(); photoInput?.click(); });
+if (pasteSave) {
+  pasteSave.addEventListener('click', async () => {
+    const txt = (pasteTextarea?.value || '').trim();
+    if (!txt) { toast('Nothing to save', 'warn'); pasteTextarea?.focus(); return; }
+    pasteSave.disabled = true; pasteSave.textContent = 'Saving…';
+    try { await saveClipboardSnippet(txt); }
+    finally { pasteSave.disabled = false; pasteSave.textContent = 'Save text'; closePasteModal(); }
+  });
+}
+// Pasting directly inside the textarea — intercept image paste to upload it
+if (pasteTextarea) {
+  pasteTextarea.addEventListener('paste', async e => {
+    const items = e.clipboardData ? Array.from(e.clipboardData.items) : [];
+    const img = items.find(i => i.type && i.type.startsWith('image/'));
+    if (img) {
+      e.preventDefault();
+      const blob = img.getAsFile();
+      if (blob) { closePasteModal(); await saveClipboardImage(blob, img.type); }
+    }
+    // text falls through to default behaviour
+  });
+}
+
+async function _walkDirectory(entry, rootPath = '') {
+  const out = [];
+  async function walk(e, prefix) {
+    if (e.isFile) {
+      const f = await new Promise(res => e.file(res, () => res(null)));
+      if (f) out.push({ file: f, path: prefix });
+    } else if (e.isDirectory) {
+      const reader = e.createReader();
+      const entries = await new Promise(res => {
+        const all = [];
+        const read = () => reader.readEntries(batch => {
+          if (!batch.length) return res(all);
+          all.push(...batch);
+          read();
+        }, () => res(all));
+        read();
+      });
+      for (const child of entries) {
+        await walk(child, prefix + '/' + child.name);
+      }
+    }
+  }
+  await walk(entry, rootPath);
+  return out;
+}
+
+async function uploadBundle(items, displayName) {
+  if (_cfg.storageBlocked) { toast('Storage full — uploads disabled', 'error'); return; }
+  if (!items.length) return;
+
+  const uid = 'b' + Math.random().toString(36).slice(2, 8);
+  const totalSize = items.reduce((s, it) => s + (it.file.size || 0), 0);
+  const progEl = mkProgressEl(uid, `📁 ${displayName} (${items.length} files)`, totalSize);
+  if (activeUploads) { activeUploads.appendChild(progEl); activeUploads.style.display = ''; }
+
+  const fd = new FormData();
+  for (const it of items) fd.append('files', it.file, it.file.name);
+  fd.append('paths', items.map(it => it.path).join('\n'));
+  fd.append('name', displayName || '');
+  fd.append('password', dzPassword ? dzPassword.value : '');
+  fd.append('expiry_hours', String(_expiry));
+  fd.append('session_id', getSession());
+
+  return new Promise(resolve => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/upload-bundle');
+    xhr.upload.onprogress = ev => {
+      if (ev.lengthComputable) setProgress(uid, Math.round(ev.loaded / ev.total * 100));
+    };
+    xhr.onload = async () => {
+      const json = safeJson(xhr.responseText);
+      if (xhr.status === 201) {
+        doneProgress(uid);
+        _resultUrl = json.url || '';
+        if (resultUrlEl) resultUrlEl.textContent = json.url;
+        if (uploadResult) uploadResult.classList.remove('hidden');
+        navigator.clipboard.writeText(json.url).catch(() => {});
+        toast(`Folder uploaded (${json.file_count} files) — link copied!`, 'success');
+        loadFileList();
+      } else {
+        failProgress(uid);
+        toast(json.error || 'Folder upload failed', 'error');
+      }
+      setTimeout(() => removeProgress(uid), 3500);
+      resolve(json);
+    };
+    xhr.onerror = () => { failProgress(uid); toast('Upload failed: network error', 'error'); resolve({}); };
+    xhr.send(fd);
+  });
 }
 
 // Returns false when the browser can't read the file (directories cause a NotReadableError)
@@ -255,6 +512,7 @@ async function uploadSingle(file) {
   fd.append('password', pw);
   fd.append('expiry_hours', String(_expiry));
   fd.append('session_id', getSession());
+  if (dzBurn && dzBurn.checked) fd.append('burn', '1');
 
   return new Promise(resolve => {
     const xhr = new XMLHttpRequest();
@@ -271,7 +529,8 @@ async function uploadSingle(file) {
         if (uploadResult) uploadResult.classList.remove('hidden');
         navigator.clipboard.writeText(json.url).catch(() => {});
         toast('Uploaded — link copied!', 'success');
-        if (json.warning) toast('⚠ ' + json.warning, 'warn');
+        if (json.warning)  toast('⚠ ' + json.warning,  'warn');
+        if (json.advisory) toast('⚠ ' + json.advisory, 'warn');
         loadFileList();
       } else {
         failProgress(uid);
@@ -345,7 +604,8 @@ async function loadFileList() {
   try {
     const r = await fetch('/api/files/all');
     const data = await r.json();
-    _allFiles = data.files || [];
+    _allFiles   = data.files   || [];
+    _allBundles = data.bundles || [];
     renderFiles();
   } catch {
     if (fileGrid) fileGrid.innerHTML = '<div class="empty-state"><div class="empty-title">Failed to load files</div></div>';
@@ -358,12 +618,17 @@ function renderFiles() {
   const sort = sortSelect?.value || 'recent';
   const me   = getSession();
 
-  let list = _allFiles.filter(f => !q || f.orig_name.toLowerCase().includes(q));
+  // Unified list: bundles + loose files, both annotated with .__kind so the
+  // renderer can branch.
+  const fileItems   = _allFiles.map(f => ({ ...f, __kind: 'file', __sortName: f.orig_name }));
+  const bundleItems = _allBundles.map(b => ({ ...b, __kind: 'bundle', __sortName: b.name, file_size: b.total_size, orig_name: b.name }));
+  let list = [...bundleItems, ...fileItems].filter(it => !q || it.__sortName.toLowerCase().includes(q));
+
   list.sort((a, b) => {
     if (sort === 'recent') return new Date(b.created_at) - new Date(a.created_at);
     if (sort === 'expiry') return new Date(a.expires_at) - new Date(b.expires_at);
-    if (sort === 'size')   return b.file_size - a.file_size;
-    if (sort === 'name')   return a.orig_name.localeCompare(b.orig_name);
+    if (sort === 'size')   return (b.file_size || 0) - (a.file_size || 0);
+    if (sort === 'name')   return a.__sortName.localeCompare(b.__sortName);
     return 0;
   });
 
@@ -373,7 +638,7 @@ function renderFiles() {
     fileGrid.innerHTML = `<div class="empty-state">
       <div class="empty-icon">📂</div>
       <div class="empty-title">${q ? `No results for "${esc(q)}"` : 'No files yet'}</div>
-      <div class="empty-sub">${q ? 'Try a different search term' : 'Drop files above or paste Ctrl+V to get started'}</div>
+      <div class="empty-sub">${q ? 'Try a different search term' : 'Drop files or a folder above, or paste Ctrl+V'}</div>
     </div>`;
     return;
   }
@@ -384,6 +649,27 @@ function renderFiles() {
   const canInline = f => /\.(jpg|jpeg|png|gif|webp|avif|pdf|mp4|webm|mov|mp3|wav|ogg|m4a|txt|md|json|py|js|ts|go|rs)$/i.test(f.orig_name);
 
   fileGrid.innerHTML = list.map(f => {
+    if (f.__kind === 'bundle') {
+      const exp     = fmtExpiry(f.expires_at);
+      const own     = isOwn(f);
+      const dlBtn   = `<a class="icon-btn" href="/b/${esc(f.id)}/zip" title="Download zip">⬇</a>`;
+      const linkBtn = `<button class="icon-btn" data-action="copybundlelink" data-id="${esc(f.id)}" title="Copy link">🔗</button>`;
+      const delBtn  = own ? `<button class="icon-btn danger" data-action="deletebundle" data-id="${esc(f.id)}" title="Delete folder">🗑</button>` : '';
+      return `<div class="file-card bundle-card${f.has_password ? ' protected' : ''}" id="bcard-${esc(f.id)}" data-bundle-id="${esc(f.id)}">
+        <a class="card-thumb type-bundle" href="/b/${esc(f.id)}" style="text-decoration:none">
+          <div class="card-thumb-icon" style="font-size:38px">📁</div>
+          <div class="bundle-card-count">${f.file_count} files</div>
+        </a>
+        <div class="card-body">
+          <div class="card-name" title="${esc(f.name)}">${esc(f.name)}</div>
+          <div class="card-meta">
+            <span class="card-size">${fmtSize(f.total_size || 0)}</span>
+            <span class="card-expiry ${exp.cls}">${exp.label}</span>
+          </div>
+        </div>
+        <div class="card-actions">${dlBtn}${linkBtn}${delBtn}</div>
+      </div>`;
+    }
     const exp      = fmtExpiry(f.expires_at);
     const type     = cardType(f);
     const thumb    = isImg(f)
@@ -398,11 +684,14 @@ function renderFiles() {
     const linkBtn  = `<button class="icon-btn" data-action="copylink" data-id="${esc(f.id)}" title="Copy link">🔗</button>`;
     const delBtn   = own ? `<button class="icon-btn danger" data-action="delete" data-id="${esc(f.id)}" title="Delete">🗑</button>` : '';
     const scanBadge = f.scan_status === 'pending' ? `<div><span class="scan-badge">scanning</span></div>` : '';
+    const burnBadge = f.burn_after_read ? `<span class="burn-badge" title="Burn after read — deletes after first download">🔥 burn</span>` : '';
+    const dangerBadge = f.dangerous ? `<span class="danger-badge" title="Executable or script — only run files from sources you trust">⚠ executable</span>` : '';
+    const webBadge = (!f.dangerous && f.web_renderable) ? `<span class="web-badge" title="Browser-renderable type — yeet shows source, never executes">📄 source</span>` : '';
 
-    return `<div class="file-card${f.has_password ? ' protected' : ''}" id="card-${esc(f.id)}">
+    return `<div class="file-card${f.has_password ? ' protected' : ''}${f.burn_after_read ? ' burn' : ''}${f.dangerous ? ' danger' : ''}" id="card-${esc(f.id)}">
       <div class="card-thumb type-${type}">${thumb}</div>
       <div class="card-body">
-        <div class="card-name" title="${esc(f.orig_name)}">${esc(f.orig_name)}</div>
+        <div class="card-name" title="${esc(f.orig_name)}">${esc(f.orig_name)}${burnBadge}${dangerBadge}${webBadge}</div>
         <div class="card-meta">
           <span class="card-size">${fmtSize(f.file_size)}</span>
           <span class="card-expiry ${exp.cls}">${exp.label}</span>
@@ -459,8 +748,17 @@ if (fileGrid) {
       toast('Link copied', 'success');
       return;
     }
+    if (action === 'copybundlelink') {
+      await navigator.clipboard.writeText(`${location.origin}/b/${btn.dataset.id}`);
+      toast('Folder link copied', 'success');
+      return;
+    }
     if (action === 'delete') {
       await deleteFile(btn.dataset.id);
+      return;
+    }
+    if (action === 'deletebundle') {
+      await deleteBundle(btn.dataset.id);
       return;
     }
 
@@ -491,6 +789,129 @@ async function deleteFile(id) {
       toast(j.error || 'Delete failed', 'error');
     }
   } catch { toast('Delete failed: network error', 'error'); }
+}
+
+async function deleteBundle(id) {
+  if (!confirm('Delete this folder and all its files?')) return;
+  try {
+    const r = await fetch(`/api/bundles/${id}`, { method: 'DELETE', headers: { 'X-Session-ID': getSession() } });
+    if (r.ok) {
+      _allBundles = _allBundles.filter(b => b.id !== id);
+      const card = document.getElementById(`bcard-${id}`);
+      if (card) { card.style.transition = 'opacity 240ms, transform 240ms'; card.style.opacity = '0'; card.style.transform = 'scale(0.92)'; setTimeout(() => card.remove(), 260); }
+      toast('Folder deleted', 'warn');
+      renderFiles();
+    } else {
+      const j = await r.json().catch(() => ({}));
+      toast(j.error || 'Delete failed', 'error');
+    }
+  } catch { toast('Delete failed: network error', 'error'); }
+}
+
+// ── Clipboard manager ─────────────────────────────────────────────────────────
+async function loadClipboardItems() {
+  if (!clipboardList) return;
+  try {
+    const r = await fetch('/api/clipboard/recent?limit=50', {
+      headers: { 'X-Session-ID': getSession() },
+    });
+    const data = await r.json();
+    _clipItems = data.items || [];
+    renderClipboard();
+  } catch {
+    /* swallow */
+  }
+}
+
+function renderClipboard() {
+  if (!clipboardList) return;
+  if (clipboardCount) clipboardCount.textContent = _clipItems.length;
+  if (clipboardEmpty) clipboardEmpty.classList.toggle('hidden', _clipItems.length > 0);
+
+  clipboardList.innerHTML = _clipItems.map(it => {
+    const isImg = it.type === 'image';
+    const preview = isImg
+      ? `<img class="clip-thumb-img" src="/api/clipboard/image/${esc(it.id)}" alt="">`
+      : `<pre class="clip-thumb-text">${esc((it.preview || '').slice(0, 240))}</pre>`;
+    const pinned = it.pinned ? '📌' : '☆';
+    const t = timeAgo(it.created_at);
+    const exp = it.pinned ? 'pinned' : fmtExpiry(it.expires_at).label;
+    const yours = it.is_yours;
+    const youBadge = yours ? `<span class="clip-you" title="You posted this">you</span>` : '';
+    const ownerActions = yours
+      ? `<button class="icon-btn" data-clip-action="pin" title="${it.pinned ? 'Unpin' : 'Pin'}">${pinned}</button>
+         <button class="icon-btn danger" data-clip-action="delete" title="Delete">🗑</button>`
+      : '';
+    return `<div class="clip-item${it.pinned ? ' pinned' : ''}${yours ? ' yours' : ''}" data-clip-id="${esc(it.id)}">
+      <div class="clip-thumb">${preview}</div>
+      <div class="clip-body">
+        <div class="clip-meta">
+          <span class="clip-type">${isImg ? '🖼 image' : '📝 text'}</span>
+          ${youBadge}
+          <span class="clip-time">${t}</span>
+          <span class="clip-exp">${exp}</span>
+        </div>
+      </div>
+      <div class="clip-actions">
+        <button class="icon-btn" data-clip-action="open" title="Open">↗</button>
+        <button class="icon-btn" data-clip-action="copy" title="Copy ${isImg ? 'link' : 'text'}">⎘</button>
+        ${ownerActions}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+if (clipboardList) {
+  clipboardList.addEventListener('click', async e => {
+    const btn = e.target.closest('[data-clip-action]');
+    if (!btn) return;
+    const row = btn.closest('[data-clip-id]');
+    const id = row?.dataset.clipId;
+    if (!id) return;
+    const action = btn.dataset.clipAction;
+    const item = _clipItems.find(x => x.id === id);
+    const url = `${location.origin}/c/${id}`;
+
+    if (action === 'open') { window.open(url, '_blank', 'noopener'); return; }
+    if (action === 'copy') {
+      if (item && item.type === 'text') {
+        try {
+          const r = await fetch(`/c/${id}/raw`);
+          const t = await r.text();
+          await navigator.clipboard.writeText(t);
+          toast('Text copied', 'success');
+        } catch { toast('Copy failed', 'error'); }
+      } else {
+        await navigator.clipboard.writeText(url);
+        toast('Link copied', 'success');
+      }
+      return;
+    }
+    if (action === 'pin') {
+      const r = await fetch(`/api/clipboard/pin/${id}`, {
+        method: 'POST',
+        headers: { 'X-Session-ID': getSession() },
+      });
+      if (r.ok) { await loadClipboardItems(); }
+      else { toast('Pin failed', 'error'); }
+      return;
+    }
+    if (action === 'delete') {
+      if (!confirm('Delete this clipboard item?')) return;
+      const r = await fetch(`/api/clipboard/item/${id}`, {
+        method: 'DELETE',
+        headers: { 'X-Session-ID': getSession() },
+      });
+      if (r.ok) {
+        _clipItems = _clipItems.filter(x => x.id !== id);
+        renderClipboard();
+        toast('Deleted', 'warn');
+      } else {
+        toast('Delete failed', 'error');
+      }
+      return;
+    }
+  });
 }
 
 // ── Preview modal ─────────────────────────────────────────────────────────────
@@ -693,4 +1114,6 @@ function dismissToast(id) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadFileList();
+loadClipboardItems();
 setInterval(loadFileList, 30_000);
+setInterval(loadClipboardItems, 60_000);

@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}{{ bundle.name }} — Yeet bundle{% endblock %}
+
+{% block content %}
+<div class="bundle-page">
+
+  <div class="bundle-header">
+    <div class="bundle-title-row">
+      <span class="bundle-icon">📁</span>
+      <h2 class="bundle-title">{{ bundle.name }}</h2>
+      {% if bundle.password_hash %}<span class="cb-view-badge encrypted">🔒 Locked</span>{% endif %}
+    </div>
+    <div class="bundle-meta">
+      <span>{{ bundle.file_count }} files</span>
+      <span>·</span>
+      <span id="bundle-total-size" data-bytes="{{ bundle.total_size }}">{{ bundle.total_size }} bytes</span>
+      <span>·</span>
+      <span>{{ bundle.download_count }} downloads</span>
+      <span>·</span>
+      <span class="bundle-expires" data-expires="{{ bundle.expires_at }}">expires {{ bundle.expires_at[:16] }}</span>
+    </div>
+  </div>
+
+  {% if needs_password %}
+  <div class="bundle-locked">
+    <p>This folder is password-protected. Open individual files via their <code>/f/&lt;id&gt;</code> URLs (you'll be prompted there).</p>
+    <p class="muted">Password-protected zip-all is disabled by design.</p>
+  </div>
+  {% else %}
+  <div class="bundle-actions">
+    <a class="btn-primary" href="/b/{{ bundle.id }}/zip">⬇ Download all (.zip)</a>
+    <button class="btn-ghost" onclick="copyBundleLink()">🔗 Copy link</button>
+  </div>
+
+  <div class="bundle-files">
+    {% for m in members %}
+    <div class="bundle-file-row">
+      <span class="bundle-file-icon">{% if m.mime_type and m.mime_type.startswith('image/') %}🖼{% elif m.mime_type and m.mime_type.startswith('video/') %}🎬{% elif m.mime_type and m.mime_type.startswith('audio/') %}🎵{% else %}📄{% endif %}</span>
+      <a class="bundle-file-name" href="/f/{{ m.id }}" title="{{ m.bundle_path or m.orig_name }}">{{ m.bundle_path or m.orig_name }}</a>
+      <span class="bundle-file-size" data-bytes="{{ m.file_size }}">{{ m.file_size }}</span>
+      <a class="bundle-file-action" href="/raw/{{ m.id }}" target="_blank" title="Open">↗</a>
+      <a class="bundle-file-action" href="/f/{{ m.id }}" title="Download">⬇</a>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="bundle-footer">
+    <a href="/" class="footer-link" style="font-size:13px">← Share your own folder via Yeet</a>
+  </div>
+
+</div>
+
+<script>
+function fmtSize(b) {
+  b = Number(b);
+  if (b < 1024)        return b + ' B';
+  if (b < 1048576)     return (b / 1024).toFixed(1) + ' KB';
+  if (b < 1073741824)  return (b / 1048576).toFixed(1) + ' MB';
+  return (b / 1073741824).toFixed(2) + ' GB';
+}
+document.querySelectorAll('[data-bytes]').forEach(el => {
+  el.textContent = fmtSize(el.dataset.bytes);
+});
+const expEl = document.querySelector('[data-expires]');
+if (expEl) {
+  const d = new Date(expEl.dataset.expires);
+  if (!isNaN(d.getTime())) {
+    expEl.textContent = 'expires ' + d.toLocaleString();
+  }
+}
+async function copyBundleLink() {
+  try { await navigator.clipboard.writeText(location.href); } catch {}
+}
+</script>
+{% endblock %}

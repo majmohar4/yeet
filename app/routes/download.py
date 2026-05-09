@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from app.config import settings
 from app.database import get_db
 from app.middleware.rate_limit import _client_ip, record_action
-from app.services.storage import get_file_path
+from app.services.storage import delete_file, get_file_path
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
@@ -129,7 +129,18 @@ async def verify_password(body: VerifyPasswordRequest, request: Request):
 
 @router.get("/raw/{file_id}")
 async def serve_raw(request: Request, file_id: str):
-    """Serve raw file content inline (used for preview embedding)."""
+    """Serve raw file content inline (used for preview embedding).
+
+    Safety:
+      - Executables/scripts are refused outright — they only work via /f/
+        (which forces Content-Disposition: attachment).
+      - Web-renderable types (HTML, SVG, JS, WASM) are served as text/plain
+        with X-Content-Type-Options: nosniff + a strict CSP — the browser
+        shows the source and cannot execute scripts or submit forms.
+      - Everything else keeps its declared mime, still under the strict CSP.
+    """
+    from app.routes.upload import EXECUTABLE_EXTENSIONS, WEB_RENDERABLE_EXTENSIONS
+
     file_id = _safe_id(file_id)
     if not file_id:
         return _error(request, 404, "File not found.")
@@ -141,11 +152,34 @@ async def serve_raw(request: Request, file_id: str):
     if record["password_hash"]:
         return _error(request, 403, "Password required.")
 
+    if record.get("burn_after_read"):
+        # Inline preview would silently consume the single view — force the
+        # main download path so the user sees the warning + claim flow.
+        return _error(request, 403, "Burn-after-read files must be downloaded via /f/.")
+
+    orig_name = (record.get("orig_name") or "").lower()
+    ext = "." + orig_name.rsplit(".", 1)[-1] if "." in orig_name else ""
+
+    if ext in EXECUTABLE_EXTENSIONS:
+        return _error(request, 403, "Executable files cannot be previewed; download via /f/.")
+
     path = get_file_path(file_id)
     if not path.exists():
         return _error(request, 404, "File data missing.")
 
     data = path.read_bytes()
+
+    if ext in WEB_RENDERABLE_EXTENSIONS:
+        # Force plaintext rendering so HTML/SVG/JS show as source, not execute.
+        return Response(
+            content=data,
+            media_type="text/plain; charset=utf-8",
+            headers={
+                "X-Content-Type-Options": "nosniff",
+                "Content-Security-Policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline';",
+            },
+        )
+
     mime = record["mime_type"] or "application/octet-stream"
     return Response(
         content=data,
@@ -204,19 +238,45 @@ async def _serve_file(request: Request, record: dict) -> Response:
         return _error(request, 410, "Download limit reached.")
 
     ip = _client_ip(request)
-    await record_action(ip, "download")
-    await _audit(ip, request, "download", file_id)
-
     db = await get_db()
-    await db.execute(
-        "UPDATE files SET download_count = download_count + 1 WHERE id=?", (file_id,)
-    )
-    await db.commit()
+
+    is_burn = bool(record.get("burn_after_read"))
+    if is_burn:
+        # Atomic claim: only one request can win. Concurrent calls see rowcount
+        # 0 and get a 410. The winner serves and then the file is deleted.
+        now = datetime.now(timezone.utc).isoformat()
+        cursor = await db.execute(
+            "UPDATE files SET claimed_at=?, download_count=download_count+1 "
+            "WHERE id=? AND claimed_at IS NULL",
+            (now, file_id),
+        )
+        await db.commit()
+        if cursor.rowcount == 0:
+            return _error(request, 410, "This burn-after-read file has already been claimed.")
+    else:
+        await db.execute(
+            "UPDATE files SET download_count = download_count + 1 WHERE id=?", (file_id,)
+        )
+        await db.commit()
+
+    await record_action(ip, "download")
+    await _audit(ip, request, "download" if not is_burn else "download_burn", file_id)
 
     data = path.read_bytes()
     mime = record["mime_type"] or "application/octet-stream"
 
     safe_name = record["orig_name"].replace('"', "").replace("\\", "")
+
+    if is_burn:
+        # Wipe immediately after building the in-memory response. We've already
+        # read the bytes; deleting the on-disk copy and flipping archived_at
+        # ensures even the cleanup loop won't keep a 24h archive copy.
+        await delete_file(file_id)
+        await db.execute(
+            "UPDATE files SET archived_at=? WHERE id=?",
+            (datetime.now(timezone.utc).isoformat(), file_id),
+        )
+        await db.commit()
 
     return Response(
         content=data,
