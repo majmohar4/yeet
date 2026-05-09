@@ -458,18 +458,23 @@ main { flex: 1; max-width: 940px; width: 100%; margin: 0 auto; padding: 36px 24p
 /* ── Modals ──────────────────────────────────────────────── */
 .modal-overlay {
   position: fixed; inset: 0; z-index: 500;
-  background: rgba(0,0,0,0.74); backdrop-filter: blur(4px);
+  background: rgba(0,0,0,0.62); backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   display: flex; align-items: center; justify-content: center; padding: 24px;
   animation: fade-in 140ms ease;
 }
+:root[data-theme="light"] .modal-overlay { background: rgba(20,20,30,0.34); }
 .modal-overlay.hidden { display: none; }
 .modal-box {
-  background: rgba(16,16,26,0.97);
-  border: 1px solid var(--border-strong); border-radius: var(--r-lg);
-  width: 100%; max-width: 420px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  width: 100%;
+  max-width: 420px;
   animation: modal-in 200ms cubic-bezier(0.16,1,0.3,1);
   overflow: hidden;
-  box-shadow: 0 24px 80px rgba(0,0,0,0.6), 0 0 50px rgba(181,55,242,0.05);
+  box-shadow: 0 24px 80px rgba(0,0,0,0.45), 0 0 50px color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--text);
 }
 .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 17px 21px; border-bottom: 1px solid var(--border); }
 .modal-title { font-size: 14px; font-weight: 600; }
@@ -853,11 +858,23 @@ footer { border-top: 1px solid var(--border); padding: 16px 28px; display: flex;
 }
 
 /* ── Help modal — tabs + scrolling content ──────────── */
-.help-modal-box {
-  width: min(720px, 100%);
+.modal-box.help-modal-box {
+  /* Override the default .modal-box max-width so help has room to breathe */
+  max-width: min(720px, calc(100vw - 24px));
+  width: min(720px, calc(100vw - 24px));
   max-height: min(86vh, 720px);
   display: flex;
   flex-direction: column;
+}
+/* The .help-body negates .modal-body's flex-column-gap layout — the help
+   panes provide their own spacing. */
+.help-modal-box .modal-body.help-body {
+  display: block;
+  padding: 20px 22px 24px;
+  gap: 0;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .help-tabs {
   display: flex;
@@ -866,6 +883,7 @@ footer { border-top: 1px solid var(--border); padding: 16px 28px; display: flex;
   border-bottom: 1px solid var(--border);
   background: var(--overlay-soft);
   flex-wrap: wrap;
+  flex-shrink: 0;
 }
 .help-tab {
   background: transparent;

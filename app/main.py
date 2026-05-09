@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
@@ -23,6 +24,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger("yeet")
 _templates = Jinja2Templates(directory="templates")
+
+# Cache-bust static assets — recomputed on every container start.
+_ASSET_VERSION = f"{settings.APP_VERSION}-{int(time.time())}"
+
+def _share_globals():
+    """Make `asset_version` available in every Jinja env that renders base.html."""
+    targets = [_templates]
+    for mod in (admin, bundles, clipboard, download, files, upload):
+        t = getattr(mod, "templates", None)
+        if t is not None:
+            targets.append(t)
+    for t in targets:
+        t.env.globals["asset_version"] = _ASSET_VERSION
+
+_share_globals()
 
 _cleanup_task: asyncio.Task | None = None
 
