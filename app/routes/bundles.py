@@ -370,7 +370,7 @@ async def download_bundle_zip(request: Request, bundle_id: str):
         except Exception: pass
         raise
 
-    safe_name = re.sub(r"[^\w\-.]", "_", b[1])[:80] or "bundle"
+    bundle_name = (b[1] or "bundle") + ".zip"
     await db.execute(
         "UPDATE bundles SET download_count = download_count + 1 WHERE id=?",
         (bundle_id,),
@@ -393,7 +393,7 @@ async def download_bundle_zip(request: Request, bundle_id: str):
         _iter_and_clean(tmp.name),
         media_type="application/zip",
         headers={
-            "Content-Disposition": f'attachment; filename="{safe_name}.zip"',
+            "Content-Disposition": storage.content_disposition(bundle_name),
             "Content-Length": str(size),
         },
     )

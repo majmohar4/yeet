@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from app.config import settings
 from app.database import get_db
 from app.middleware.rate_limit import _client_ip, record_action
-from app.services.storage import delete_file, get_file_path
+from app.services.storage import content_disposition, delete_file, get_file_path
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
@@ -265,8 +265,6 @@ async def _serve_file(request: Request, record: dict) -> Response:
     data = path.read_bytes()
     mime = record["mime_type"] or "application/octet-stream"
 
-    safe_name = record["orig_name"].replace('"', "").replace("\\", "")
-
     if is_burn:
         # Wipe immediately after building the in-memory response. We've already
         # read the bytes; deleting the on-disk copy and flipping archived_at
@@ -282,7 +280,7 @@ async def _serve_file(request: Request, record: dict) -> Response:
         content=data,
         media_type=mime,
         headers={
-            "Content-Disposition": f'attachment; filename="{safe_name}"',
+            "Content-Disposition": content_disposition(record["orig_name"]),
             "Content-Length": str(len(data)),
             "X-Content-Type-Options": "nosniff",
         },

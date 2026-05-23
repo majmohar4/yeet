@@ -3,6 +3,7 @@ import os
 import re
 import unicodedata
 from pathlib import Path
+from urllib.parse import quote
 
 import aiofiles
 
@@ -19,6 +20,19 @@ def sanitize_filename(name: str) -> str:
     if not name:
         name = "file"
     return name[: settings.MAX_FILENAME_LENGTH]
+
+
+def content_disposition(name: str) -> str:
+    """RFC 5987 Content-Disposition with Unicode-safe filename.
+
+    HTTP headers must be latin-1 encodable. Raw filenames with characters
+    like 'č' would crash Starlette when it encodes the response. We emit an
+    ASCII fallback plus a percent-encoded UTF-8 form so modern clients see
+    the original name and old ones still get something sensible.
+    """
+    ascii_fallback = sanitize_filename(name).replace('"', "").replace("\\", "")
+    encoded = quote(name, safe="")
+    return f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{encoded}"
 
 
 async def save_file(file_id: str, data: bytes) -> Path:
