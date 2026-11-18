@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import sqlite3
 import time
 from contextlib import asynccontextmanager
 
@@ -14,7 +15,8 @@ from app.config import settings
 from app.database import close_db, init_db
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.security import SecurityHeadersMiddleware
-from app.routes import admin, bundles, clipboard, download, files, upload
+from app.routes import admin, bundles, chunked, clipboard, download, files, upload
+from app.services import virus_scan
 from app.services.cleanup import cleanup_loop
 
 load_dotenv()
@@ -28,19 +30,33 @@ _templates = Jinja2Templates(directory="templates")
 # Cache-bust static assets — recomputed on every container start.
 _ASSET_VERSION = f"{settings.APP_VERSION}-{int(time.time())}"
 
+def _filesize(n) -> str:
+    units = ("B", "KB", "MB", "GB", "TB")
+    n, i = float(n or 0), 0
+    while n >= 1024 and i < len(units) - 1:
+        n /= 1024
+        i += 1
+    return f"{n:.0f} {units[i]}" if n >= 10 or n == int(n) else f"{n:.1f} {units[i]}"
+
+
 def _share_globals():
     """Make `asset_version` available in every Jinja env that renders base.html."""
     targets = [_templates]
-    for mod in (admin, bundles, clipboard, download, files, upload):
+    for mod in (admin, bundles, chunked, clipboard, download, files, upload):
         t = getattr(mod, "templates", None)
         if t is not None:
             targets.append(t)
     for t in targets:
         t.env.globals["asset_version"] = _ASSET_VERSION
+        t.env.globals["contact_email"] = settings.CONTACT_EMAIL
+        t.env.globals["app_version"] = settings.APP_VERSION
+        t.env.globals["chunk_mb"] = settings.CHUNK_SIZE // 1_048_576
+        t.env.filters["filesize"] = _filesize
 
 _share_globals()
 
 _cleanup_task: asyncio.Task | None = None
+_clamd_task: asyncio.Task | None = None
 
 
 @asynccontextmanager
@@ -49,16 +65,21 @@ async def lifespan(app: FastAPI):
     settings.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     settings.ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
     (settings.BASE_DIR / "clipboard").mkdir(parents=True, exist_ok=True)
+    settings.PARTIAL_DIR.mkdir(parents=True, exist_ok=True)
 
     await init_db()
+    await chunked.recover_interrupted()
     logger.info("yeet %s started", settings.APP_VERSION)
 
-    global _cleanup_task
+    global _cleanup_task, _clamd_task
     _cleanup_task = asyncio.create_task(cleanup_loop())
+    _clamd_task = asyncio.create_task(virus_scan.clamd_supervisor_loop())
 
     yield
 
     _cleanup_task.cancel()
+    _clamd_task.cancel()
+    await virus_scan.stop_clamd()
     await close_db()
     logger.info("yeet stopped")
 
@@ -83,6 +104,7 @@ app.include_router(files.router)
 app.include_router(admin.router)
 app.include_router(clipboard.router)
 app.include_router(bundles.router)
+app.include_router(chunked.router)
 
 
 @app.get("/c/{item_id}/raw")
@@ -144,38 +166,9 @@ async def clipboard_view(request: Request, item_id: str):
 
 @app.get("/health")
 async def health():
-    from app.services.storage import get_total_storage
-    from app.services.config_manager import get_storage_limit
-    from app.database import get_db as _get_db
-    from datetime import datetime, timezone
-
-    total = get_total_storage()
-    limit = get_storage_limit()
-    db = await _get_db()
-    now = datetime.now(timezone.utc).isoformat()
-    async with db.execute(
-        "SELECT COUNT(*) FROM files WHERE archived_at IS NULL AND expires_at > ?", (now,)
-    ) as cur:
-        active_files = (await cur.fetchone())[0]
-    async with db.execute(
-        "SELECT COUNT(*) FROM files WHERE archived_at IS NOT NULL"
-    ) as cur:
-        archived_files = (await cur.fetchone())[0]
-
-    return JSONResponse({
-        "status": "ok",
-        "version": settings.APP_VERSION,
-        "storage": {
-            "used_bytes": total,
-            "used_gb": round(total / 1_073_741_824, 3),
-            "limit_gb": round(limit / 1_073_741_824, 1),
-            "usage_pct": round(total / limit * 100, 1) if limit else 0,
-        },
-        "files": {
-            "active": active_files,
-            "archived": archived_files,
-        },
-    })
+    """Liveness only. Storage totals and file counts are operational detail —
+    they live behind admin auth at /admin, not on an unauthenticated endpoint."""
+    return JSONResponse({"status": "ok", "version": settings.APP_VERSION})
 
 
 @app.exception_handler(404)
@@ -187,11 +180,29 @@ async def not_found(request: Request, exc):
     )
 
 
+async def _disk_full(request: Request, exc: Exception):
+    from app.services.ingest import disk_full_message
+    from app.services.storage import is_disk_full_error
+
+    if not is_disk_full_error(exc):
+        return await server_error(request, exc)
+    logger.error("disk full: %s %s — %s", request.method, request.url.path, exc)
+    return JSONResponse({"error": disk_full_message()}, status_code=507)
+
+
 @app.exception_handler(500)
 async def server_error(request: Request, exc):
-    logger.exception("unhandled error: %s", exc)
+    logger.error("unhandled error on %s %s: %r", request.method, request.url.path, exc)
+    if "text/html" not in request.headers.get("accept", ""):
+        return JSONResponse({"error": "Internal server error."}, status_code=500)
     return _templates.TemplateResponse(
         "error.html",
         {"request": request, "status": 500, "message": "Internal server error."},
         status_code=500,
     )
+
+
+# A full disk used to surface as a bare 500 with a traceback in the logs. These
+# map ENOSPC / "database or disk is full" to a 507 the UI can explain.
+app.add_exception_handler(OSError, _disk_full)
+app.add_exception_handler(sqlite3.OperationalError, _disk_full)

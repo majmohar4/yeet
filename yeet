@@ -28,7 +28,7 @@ from pathlib import Path
 
 DB_PATH     = os.getenv("YEET_DB_PATH",     "/data/yeet.db")
 CONFIG_PATH = os.getenv("YEET_CONFIG_PATH", "/data/config.json")
-YEET_URL    = os.getenv("YEET_URL",         "https://yeet.majmohar.eu")
+YEET_URL    = os.getenv("YEET_URL",         "https://yeet.majmohar.eu").rstrip("/")
 ADMIN_PASS  = os.getenv("YEET_ADMIN_PASSWORD", "")
 ADMIN_USER  = os.getenv("YEET_ADMIN_USER",  "admin")
 
@@ -351,91 +351,118 @@ def cmd_health(_args):
         err(f"Health check failed: {e}")
 
 
+def _http(method, url, body=None, headers=None, timeout=300):
+    """JSON-ish HTTP call with retries for transient failures. Returns (status, bytes)."""
+    import time
+    hdrs = {"User-Agent": "yeet-cli"}
+    hdrs.update(headers or {})
+    if isinstance(body, dict):
+        body = json.dumps(body).encode()
+        hdrs["Content-Type"] = "application/json"
+    delay = 1
+    for attempt in range(1, 9):
+        req = urllib.request.Request(url, data=body, method=method, headers=hdrs)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.status, r.read()
+        except urllib.error.HTTPError as e:
+            data = e.read()
+            transient = e.code in (408, 429, 500, 502, 503, 504, 520, 522, 524) or (
+                e.code == 400 and method == "PUT")
+            if not transient or attempt == 8:
+                return e.code, data
+        except (urllib.error.URLError, TimeoutError, ConnectionError, OSError):
+            if attempt == 8:
+                raise
+        time.sleep(delay)
+        delay = min(delay * 2, 30)
+
+
+def _api_error(code, data):
+    try:
+        return json.loads(data).get("error") or f"HTTP {code}"
+    except Exception:
+        return f"HTTP {code}"
+
+
 def cmd_upload(args):
-    """Upload a file via HTTP API.
-    Usage: yeet upload <file> [--password <pw>] [--max-downloads <n>] [--bypass-code <code>] [--burn]
+    """Upload a file in chunks (resumable per chunk, works behind Cloudflare's 100 MB cap).
+    Usage: yeet upload <file> [--password <pw>] [--max-downloads <n>] [--expiry <hours>]
+                              [--bypass-code <code>] [--burn]
     """
-    import mimetypes
-
+    import time
     file_path = None
-    password  = ""
-    max_dl    = ""
-    bypass    = ""
-    burn      = False
-
+    payload = {}
     it = iter(args)
     for a in it:
-        if a in ("--password", "-p"):        password = next(it, "")
-        elif a in ("--max-downloads", "-m"): max_dl   = next(it, "")
-        elif a in ("--bypass-code", "-b"):   bypass   = next(it, "")
-        elif a in ("--burn",):               burn     = True
+        if a in ("--password", "-p"):        payload["password"] = next(it, "")
+        elif a in ("--max-downloads", "-m"): payload["max_downloads"] = next(it, "")
+        elif a in ("--bypass-code", "-b"):   payload["bypass_code"] = next(it, "")
+        elif a in ("--expiry", "-e"):        payload["expiry_hours"] = next(it, "")
+        elif a == "--burn":                  payload["burn"] = 1
         else:                                file_path = a
 
     if not file_path:
-        err("Usage: yeet upload <file> [--password <pw>] [--max-downloads <n>] [--bypass-code <code>] [--burn]")
-    if not Path(file_path).exists():
+        err("Usage: yeet upload <file> [--password <pw>] [--max-downloads <n>] "
+            "[--expiry <hours>] [--bypass-code <code>] [--burn]")
+    path = Path(file_path)
+    if not path.is_file():
         err(f"File not found: {file_path}")
+    size = path.stat().st_size
 
-    info(f"Uploading {Path(file_path).name}…")
+    code, data = _http("POST", f"{YEET_URL}/api/uploads",
+                       {"name": path.name, "size": size, **payload})
+    if code != 201:
+        err(f"Upload refused: {_api_error(code, data)}")
+    up = json.loads(data)
+    cs, n = up["chunk_size"], up["chunk_count"]
+    info(f"Uploading {path.name} ({_fmt_size(size)}, {n} chunk{'s' if n != 1 else ''})")
 
-    # Build multipart request using Python stdlib
-    boundary = "---YEET" + secrets.token_hex(8)
-    body_parts = []
+    sent = 0
+    t0 = time.monotonic()
+    with open(path, "rb") as fh:
+        for i in range(n):
+            fh.seek(i * cs)
+            chunk = fh.read(cs)
+            code, data = _http("PUT", f"{YEET_URL}/api/uploads/{up['id']}/chunks/{i}", chunk,
+                               {"Content-Type": "application/octet-stream"})
+            if code != 200:
+                err(f"Chunk {i} failed: {_api_error(code, data)}")
+            sent += len(chunk)
+            rate = sent / max(time.monotonic() - t0, 0.001)
+            sys.stderr.write(f"\r  {sent * 100 // max(size, 1):3d}%  {_fmt_size(sent)} / "
+                             f"{_fmt_size(size)}  {_fmt_size(int(rate))}/s   ")
+            sys.stderr.flush()
+    sys.stderr.write("\n")
 
-    def _field(name, value):
-        return (
-            f"--{boundary}\r\n"
-            f"Content-Disposition: form-data; name=\"{name}\"\r\n\r\n"
-            f"{value}\r\n"
-        ).encode()
-
-    body_parts.append(_field("password", password))
-    body_parts.append(_field("max_downloads", max_dl))
-    body_parts.append(_field("bypass_code", bypass))
-    if burn:
-        body_parts.append(_field("burn", "1"))
-
-    file_bytes = Path(file_path).read_bytes()
-    mime = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
-    fname = Path(file_path).name
-    body_parts.append(
-        f"--{boundary}\r\n"
-        f"Content-Disposition: form-data; name=\"file\"; filename=\"{fname}\"\r\n"
-        f"Content-Type: {mime}\r\n\r\n".encode()
-        + file_bytes + b"\r\n"
-    )
-    body_parts.append(f"--{boundary}--\r\n".encode())
-    body = b"".join(body_parts)
-
-    req = urllib.request.Request(
-        f"{YEET_URL}/upload",
-        data=body,
-        method="POST",
-        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=120) as r:
-            data = json.loads(r.read())
-    except urllib.error.HTTPError as e:
-        try: body_err = json.loads(e.read()).get("error", str(e))
-        except Exception: body_err = str(e)
-        err(f"Upload failed (HTTP {e.code}): {body_err}")
-    except Exception as e:
-        err(f"Upload failed: {e}")
+    info("Scanning…")
+    code, data = _http("POST", f"{YEET_URL}/api/uploads/{up['id']}/complete")
+    while code == 202:
+        time.sleep(2)
+        code, data = _http("GET", f"{YEET_URL}/api/uploads/{up['id']}")
+        st = json.loads(data)
+        if st.get("status") in ("done", "failed"):
+            code, data = st["code"], json.dumps(st["result"]).encode()
+        elif st.get("status") == "uploading":
+            code, data = _http("POST", f"{YEET_URL}/api/uploads/{up['id']}/complete")
+        else:
+            code = 202
+    if code != 201:
+        err(f"Upload failed: {_api_error(code, data)}")
+    data = json.loads(data)
 
     ok("Upload complete")
     print()
     print(f"  URL:     {data['url']}")
-    print(f"  Expires: {data['expires_at'][:10]}")
+    print(f"  Expires: {data['expires_at'][:16].replace('T', ' ')} UTC")
     print(f"  Size:    {_fmt_size(data['size'])}")
     print(f"  Scan:    {data['scan_status']}")
     if data.get("bypassed"):
         print(f"  Bypass:  {yel('yes — limits skipped')}")
     if data.get("warning"):
-        print(f"  {yel('⚠ ' + data['warning'])}")
+        print(f"  {yel('! ' + data['warning'])}")
     print()
 
-    # Copy to clipboard if available
     url = data["url"]
     try:
         import subprocess
@@ -449,46 +476,85 @@ def cmd_upload(args):
 
 
 def cmd_download(args):
-    """Download a file via HTTP API.
+    """Download a file in 64 MB ranges; re-running resumes a partial download.
     Usage: yeet download <url> [--output <path>] [--password <pw>]
     """
+    import re
     url = ""
     output = ""
     password = ""
     it = iter(args)
     for a in it:
-        if a in ("--output", "-o"):   output   = next(it, "")
+        if a in ("--output", "-o"):     output   = next(it, "")
         elif a in ("--password", "-p"): password = next(it, "")
         else:                           url = a
-    if not url:
-        err("Usage: yeet download <url> [--output <path>] [--password <pw>]")
-
-    info("Downloading…")
+    m = re.search(r"/f/([0-9a-f]{32})", url)
+    if not m:
+        err("Usage: yeet download <https://host/f/<id>> [--output <path>] [--password <pw>]")
+    base = url[:m.start()]
+    fid = m.group(1)
+    dl = f"{base}/f/{fid}?dl=1"
 
     if password:
-        data = urllib.parse.urlencode({"password": password}).encode()
-        req = urllib.request.Request(url, data=data, method="POST")
-    else:
-        req = urllib.request.Request(url, method="GET")
+        code, data = _http("POST", f"{base}/api/verify-password",
+                           {"file_id": fid, "password": password})
+        res = json.loads(data or b"{}")
+        if code != 200 or not res.get("success"):
+            err(res.get("error") or f"Password check failed (HTTP {code})")
+        dl = base + res["download_url"]
 
+    # Probe size + name with a 1-byte range (doesn't count as a download).
+    req = urllib.request.Request(dl, headers={"Range": "bytes=1-1", "User-Agent": "yeet-cli"})
     try:
-        with urllib.request.urlopen(req, timeout=120) as r:
-            content = r.read()
+        with urllib.request.urlopen(req, timeout=60) as r:
             cd = r.headers.get("Content-Disposition", "")
+            total = int((r.headers.get("Content-Range") or "/0").rsplit("/", 1)[-1] or 0)
+            ranged = r.status == 206
     except urllib.error.HTTPError as e:
-        err(f"Download failed (HTTP {e.code})")
-    except Exception as e:
-        err(f"Download failed: {e}")
+        if e.code not in (409, 416):  # 409: single-download file, 416: empty file
+            err(f"Download failed: {_api_error(e.code, e.read())}")
+        cd, total, ranged = "", 0, False
 
     if not output:
-        # Try to get filename from Content-Disposition
-        if "filename=" in cd:
-            output = cd.split("filename=")[-1].strip('" ')
-        else:
-            output = "download"
+        m2 = re.search(r"filename\*=UTF-8''([^;]+)", cd)
+        output = urllib.parse.unquote(m2.group(1)) if m2 else (
+            re.search(r'filename="([^"]+)"', cd).group(1) if 'filename="' in cd else "download")
+        output = Path(output).name
+    out = Path(output)
+    part = out.with_name(out.name + ".part")
 
-    Path(output).write_bytes(content)
-    ok(f"Saved to {output}  ({_fmt_size(len(content))})")
+    if not ranged:  # single-download files are sent whole, never in ranges
+        req = urllib.request.Request(dl, headers={"User-Agent": "yeet-cli"})
+        try:
+            with urllib.request.urlopen(req, timeout=3600) as r:
+                data = r.read()
+                cd = r.headers.get("Content-Disposition", "")
+        except urllib.error.HTTPError as e:
+            err(f"Download failed: {_api_error(e.code, e.read())}")
+        if output == "download" and "filename*=UTF-8''" in cd:
+            out = Path(Path(urllib.parse.unquote(cd.split("filename*=UTF-8''")[1])).name)
+        out.write_bytes(data)
+        ok(f"Saved to {out}  ({_fmt_size(len(data))})")
+        return
+
+    have = part.stat().st_size if part.exists() else 0
+    if have:
+        info(f"Resuming at {_fmt_size(have)}")
+    step = 64 * 1_048_576
+    with open(part, "ab") as fh:
+        while have < total:
+            end = min(total, have + step) - 1
+            code, data = _http("GET", dl, headers={"Range": f"bytes={have}-{end}"}, timeout=600)
+            if code not in (200, 206):
+                err(f"Download failed at {_fmt_size(have)}: {_api_error(code, data)}  "
+                    "(run the same command again to resume)")
+            fh.write(data)
+            have += len(data)
+            sys.stderr.write(f"\r  {have * 100 // max(total, 1):3d}%  {_fmt_size(have)} / {_fmt_size(total)}   ")
+            sys.stderr.flush()
+    sys.stderr.write("\n")
+    part.replace(out)
+    ok(f"Saved to {out}  ({_fmt_size(total)})")
 
 
 def cmd_help(_args):

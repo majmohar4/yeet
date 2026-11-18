@@ -11,15 +11,17 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-        response.headers["Content-Security-Policy"] = (
+        # Routes like /raw set a stricter policy of their own — keep it.
+        response.headers.setdefault("Content-Security-Policy", (
             "default-src 'self'; "
             "script-src 'self' 'unsafe-inline'; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "font-src 'self' https://fonts.gstatic.com; "
-            "img-src 'self' data:; "
+            "img-src 'self' data: blob:; "
             "connect-src 'self'; "
+            "media-src 'self' blob:; "
             "frame-ancestors 'none';"
-        )
+        ))
         # Only send HSTS on HTTPS
         if request.url.scheme == "https":
             response.headers["Strict-Transport-Security"] = (

@@ -618,11 +618,12 @@ def test_storage_limit_507_is_json(client):
             assert "error" in r.json()
             break
 
-def test_storage_limit_error_mentions_contact(client):
+def test_storage_limit_error_is_explained(client):
     for _ in range(5):
         r = upload(client)
         if r.status_code == 507:
-            assert "majmohar.eu" in r.json().get("error", "")
+            msg = r.json().get("error", "").lower()
+            assert "space" in msg or "storage" in msg
             break
 
 def test_homepage_storage_pct_field(client):
@@ -759,3 +760,247 @@ def test_eicar_logged_to_audit(client):
     db.close()
     # May be empty if ClamAV not running — that's OK
     assert isinstance(rows, list)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 21. Ownership & access control (regression: session-id disclosure)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _upload_owned(client, session, filename="owned.txt"):
+    r = client.post(
+        "/upload",
+        files={"file": (filename, io.BytesIO(b"owned content"), "text/plain")},
+        data={"session_id": session},
+    )
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
+def test_file_listing_never_returns_uploader_session(client):
+    _upload_owned(client, "sess-leak-check")
+    body = client.get("/api/files/all").json()
+    for row in body["files"] + body["bundles"]:
+        assert "uploader_session" not in row
+
+
+def test_bundle_listing_never_returns_uploader_session(client):
+    body = client.get("/api/bundles/all").json()
+    for row in body["bundles"]:
+        assert "uploader_session" not in row
+
+
+def test_listing_marks_ownership_for_the_owner(client):
+    session = f"owner-{uuid.uuid4().hex}"
+    fid = _upload_owned(client, session)
+    rows = client.get("/api/files/all", headers={"X-Session-ID": session}).json()["files"]
+    mine = [r for r in rows if r["id"] == fid]
+    assert mine and mine[0]["is_yours"] is True
+
+
+def test_listing_hides_ownership_from_strangers(client):
+    fid = _upload_owned(client, f"owner-{uuid.uuid4().hex}")
+    rows = client.get("/api/files/all", headers={"X-Session-ID": "someone-else"}).json()["files"]
+    seen = [r for r in rows if r["id"] == fid]
+    if seen:  # absent entirely when PUBLIC_LISTING=false, which is also fine
+        assert seen[0]["is_yours"] is False
+
+
+def test_stranger_cannot_delete_someone_elses_file(client):
+    session = f"owner-{uuid.uuid4().hex}"
+    fid = _upload_owned(client, session)
+    assert client.delete(f"/api/files/{fid}",
+                         headers={"X-Session-ID": "attacker"}).status_code == 403
+    assert client.delete(f"/api/files/{fid}").status_code == 403
+    assert client.get(f"/f/{fid}").status_code == 200  # still there
+    assert client.delete(f"/api/files/{fid}",
+                         headers={"X-Session-ID": session}).status_code == 200
+
+
+def test_stranger_cannot_delete_someone_elses_bundle(client):
+    session = f"owner-{uuid.uuid4().hex}"
+    r = client.post(
+        "/upload-bundle",
+        files=[("files", ("a.txt", io.BytesIO(b"a"), "text/plain"))],
+        data={"paths": "d/a.txt", "session_id": session},
+    )
+    assert r.status_code == 201, r.text
+    bid = r.json()["id"]
+    assert client.delete(f"/api/bundles/{bid}",
+                         headers={"X-Session-ID": "attacker"}).status_code == 403
+    assert client.delete(f"/api/bundles/{bid}",
+                         headers={"X-Session-ID": session}).status_code == 200
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 22. Client IP spoofing
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def test_forged_x_forwarded_for_is_not_taken_as_client_ip(client):
+    forged = "203.0.113.250"
+    fid = None
+    r = client.post(
+        "/upload",
+        files={"file": ("xff.txt", io.BytesIO(b"xff"), "text/plain")},
+        data={"session_id": "xff-test"},
+        headers={"X-Forwarded-For": f"{forged}, 198.51.100.1"},
+    )
+    assert r.status_code == 201, r.text
+    fid = r.json()["id"]
+
+    db = _db()
+    if db is None:
+        pytest.skip("DB not accessible")
+    row = db.execute("SELECT client_ip FROM files WHERE id=?", (fid,)).fetchone()
+    db.close()
+    # The left-most entry is written by the caller and must never be trusted.
+    assert row and row[0] != forged
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 23. /raw cannot be used to dodge download accounting
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def test_raw_respects_max_downloads(client):
+    r = client.post(
+        "/upload",
+        files={"file": ("capped.txt", io.BytesIO(b"capped"), "text/plain")},
+        data={"max_downloads": "1"},
+    )
+    assert r.status_code == 201
+    fid = r.json()["id"]
+    assert client.get(f"/f/{fid}").status_code == 200      # spends the only download
+    assert client.get(f"/f/{fid}").status_code == 410
+    assert client.get(f"/raw/{fid}").status_code == 410    # must not serve it either
+
+
+def test_raw_redirects_non_previewable_types_to_metered_path(client):
+    r = client.post(
+        "/upload",
+        files={"file": ("blob.zip", io.BytesIO(b"PK\x03\x04blob"), "application/zip")},
+    )
+    assert r.status_code == 201
+    fid = r.json()["id"]
+    with httpx.Client(base_url=BASE_URL, follow_redirects=False, timeout=30) as c:
+        resp = c.get(f"/raw/{fid}")
+    assert resp.status_code == 302
+    assert resp.headers["location"].split("?")[0].endswith(f"/f/{fid}")
+
+
+def test_raw_preview_does_not_count_as_a_download(client):
+    r = client.post(
+        "/upload",
+        files={"file": ("preview.txt", io.BytesIO(b"preview me"), "text/plain")},
+    )
+    fid = r.json()["id"]
+    for _ in range(3):
+        assert client.get(f"/raw/{fid}").status_code == 200
+    meta = client.get(f"/api/files?ids={fid}").json()["files"][0]
+    assert meta["download_count"] == 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 24. Misc hardening
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def test_max_downloads_zero_is_stored_as_unlimited(client):
+    r = client.post(
+        "/upload",
+        files={"file": ("zero.txt", io.BytesIO(b"zero"), "text/plain")},
+        data={"max_downloads": "0"},
+    )
+    assert r.status_code == 201
+    fid = r.json()["id"]
+    assert client.get(f"/api/files?ids={fid}").json()["files"][0]["max_downloads"] is None
+    assert client.get(f"/f/{fid}").status_code == 200
+
+
+def test_health_does_not_leak_storage_or_file_counts(client):
+    body = client.get("/health").json()
+    assert "storage" not in body
+    assert "files" not in body
+
+
+# ── Chunked uploads, ranged downloads, landing page (1.2.0) ──────────────────
+
+def _chunked_upload(client, name: str, data: bytes, **opts) -> dict:
+    r = client.post("/api/uploads", json={"name": name, "size": len(data), **opts})
+    assert r.status_code == 201, r.text
+    up = r.json()
+    cs = up["chunk_size"]
+    for i in reversed(range(up["chunk_count"])):  # order must not matter
+        rr = client.put(f"/api/uploads/{up['id']}/chunks/{i}", content=data[i * cs:(i + 1) * cs])
+        assert rr.status_code == 200, rr.text
+    r = client.post(f"/api/uploads/{up['id']}/complete")
+    for _ in range(120):
+        if r.status_code != 202:
+            break
+        time.sleep(1)
+        st = client.get(f"/api/uploads/{up['id']}").json()
+        if st["status"] in ("done", "failed"):
+            assert st["code"] == 201, st
+            return st["result"]
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def test_chunked_upload_roundtrip(client):
+    data = os.urandom(300_000)
+    res = _chunked_upload(client, "chunked.bin", data)
+    assert client.get(f"/f/{res['id']}").content == data
+
+
+def test_chunked_upload_rejects_wrong_chunk_size(client):
+    r = client.post("/api/uploads", json={"name": "x.bin", "size": 10})
+    up = r.json()
+    assert client.put(f"/api/uploads/{up['id']}/chunks/0", content=b"short").status_code == 400
+    assert client.put(f"/api/uploads/{up['id']}/chunks/5", content=b"0123456789").status_code == 400
+    assert client.post(f"/api/uploads/{up['id']}/complete").status_code == 409
+
+
+def test_chunked_upload_size_limit(client):
+    r = client.post("/api/uploads", json={"name": "huge.bin", "size": 10**13})
+    assert r.status_code in (413, 507)
+
+
+def test_range_download_and_resume_not_counted(client):
+    data = os.urandom(50_000)
+    res = _chunked_upload(client, "r.bin", data, max_downloads=1)
+    r = client.get(f"/f/{res['id']}", headers={"Range": "bytes=0-9999"})
+    assert r.status_code == 206 and r.content == data[:10000]
+    r = client.get(f"/f/{res['id']}", headers={"Range": "bytes=10000-"})
+    assert r.status_code == 206 and r.content == data[10000:]
+    # The first request used the single allowed download; a fresh one is refused.
+    assert client.get(f"/f/{res['id']}").status_code == 410
+
+
+def test_browser_gets_landing_page_not_bytes(client):
+    res = _chunked_upload(client, "page.txt", b"hello landing")
+    r = client.get(f"/f/{res['id']}", headers={"Accept": "text/html"})
+    assert r.status_code == 200 and "text/html" in r.headers["content-type"]
+    assert b"hello landing" not in r.content
+    r = client.get(f"/f/{res['id']}?dl=1", headers={"Accept": "text/html"})
+    assert r.content == b"hello landing"
+
+
+def test_burn_survives_link_preview_bots_and_ranges(client):
+    res = _chunked_upload(client, "burn.txt", b"only once", burn=1)
+    url = f"/f/{res['id']}"
+    assert b"only once" not in client.get(url, headers={"User-Agent": "Slackbot-LinkExpanding 1.1"}).content
+    assert client.get(url, headers={"Range": "bytes=1-1"}).status_code == 409
+    assert client.get(url).content == b"only once"
+    assert client.get(url).status_code in (404, 410)
+
+
+def test_chunked_folder_hidden_until_published(client):
+    r = client.post("/api/bundles", json={"name": "F", "file_count": 1, "total_size": 3,
+                                          "session_id": "t-sess"})
+    b = r.json()
+    r = client.post("/api/uploads", json={"name": "a.txt", "size": 3, "bundle_id": b["id"],
+                                          "bundle_token": "nope", "path": "F/a.txt"})
+    assert r.status_code == 403
+    _chunked_upload(client, "a.txt", b"abc", bundle_id=b["id"], bundle_token=b["token"],
+                    path="F/a.txt")
+    assert client.get(f"/b/{b['id']}").status_code == 404
+    r = client.post(f"/api/bundles/{b['id']}/complete", json={"bundle_token": b["token"]})
+    assert r.status_code == 201 and r.json()["file_count"] == 1
+    assert client.get(f"/b/{b['id']}").status_code == 200

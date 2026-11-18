@@ -5,6 +5,8 @@ Downloads: count-based, per IP, 1-hour sliding window.
 Uploads:   byte-based, per IP, 24-hour rolling window (enforced in upload route).
 Bypass:    valid bypass code skips all upload limits.
 """
+import ipaddress
+import time
 from datetime import datetime, timedelta, timezone
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -16,17 +18,55 @@ from app.database import get_db
 from app.services.config_manager import get_daily_upload_limit
 
 
+def _parse_ip(value: str) -> str | None:
+    """Return a normalised IP, or None if `value` isn't one."""
+    v = value.strip()
+    if not v:
+        return None
+    if v.startswith("["):  # [2001:db8::1]:443
+        v = v[1:].split("]", 1)[0]
+    elif v.count(":") == 1:  # 1.2.3.4:5678
+        v = v.split(":", 1)[0]
+    try:
+        return str(ipaddress.ip_address(v))
+    except ValueError:
+        return None
+
+
 def _client_ip(request: Request) -> str:
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    """Resolve the client IP without trusting caller-supplied hops.
+
+    The left-most X-Forwarded-For entry is written by the caller, so using it
+    hands every attacker a fresh identity per request and voids all per-IP
+    limits. Only two sources are trusted: a header our own proxy always
+    overwrites (REAL_IP_HEADER, e.g. cloudflared's CF-Connecting-IP), and the
+    Nth-from-the-right XFF entry, where N is the number of proxies we run.
+    """
+    if settings.REAL_IP_HEADER:
+        ip = _parse_ip(request.headers.get(settings.REAL_IP_HEADER, "").split(",")[0])
+        if ip:
+            return ip
+
+    hops = settings.TRUSTED_PROXY_HOPS
+    if hops > 0:
+        parts = [p for p in (request.headers.get("X-Forwarded-For") or "").split(",") if p.strip()]
+        if len(parts) >= hops:
+            ip = _parse_ip(parts[-hops])
+            if ip:
+                return ip
+
     return request.client.host if request.client else "unknown"
 
 
 # ── Bypass code helpers ───────────────────────────────────────────────────────
 
-async def validate_bypass_code(code: str) -> bool:
-    """Return True and mark code used if valid and not expired."""
+async def peek_bypass_code(code: str) -> bool:
+    """Return True if the code is currently valid — without spending it.
+
+    Codes are single-use, so they must only be marked used once the upload has
+    actually been accepted; otherwise a rejected upload (too large, malware,
+    storage full) burns a code the user never got any benefit from.
+    """
     if not code or not code.strip():
         return False
     db = await get_db()
@@ -35,12 +75,22 @@ async def validate_bypass_code(code: str) -> bool:
         "SELECT code FROM bypass_codes WHERE code=? AND used=0 AND expires_at > ?",
         (code.strip().upper(), now),
     ) as cursor:
-        row = await cursor.fetchone()
-    if row:
-        await db.execute("UPDATE bypass_codes SET used=1 WHERE code=?", (code.strip().upper(),))
-        await db.commit()
-        return True
-    return False
+        return await cursor.fetchone() is not None
+
+
+async def consume_bypass_code(code: str) -> bool:
+    """Atomically mark a code used. False if someone else got there first."""
+    if not code or not code.strip():
+        return False
+    db = await get_db()
+    now = datetime.now(timezone.utc).isoformat()
+    cursor = await db.execute(
+        "UPDATE bypass_codes SET used=1 WHERE code=? AND used=0 AND expires_at > ?",
+        (code.strip().upper(), now),
+    )
+    await db.commit()
+    return cursor.rowcount > 0
+
 
 
 # ── Upload bandwidth helpers ──────────────────────────────────────────────────
@@ -110,6 +160,31 @@ async def check_upload_bandwidth(ip: str, upload_size: int) -> dict:
         "remaining": remaining,
         "reset_in_hours": round(reset_in, 1),
     }
+
+
+# ── Preview rate limit ────────────────────────────────────────────────────────
+# Kept in memory, not in `rate_limits`: a single grid render fires one /raw
+# request per thumbnail, and writing a row for each would swamp the table.
+
+_preview_hits: dict[str, list[float]] = {}
+
+
+def check_preview_rate(ip: str) -> bool:
+    limit = settings.RATE_LIMIT_PREVIEWS
+    if limit <= 0:
+        return True
+    now = time.monotonic()
+    cutoff = now - 3600
+    hits = [t for t in _preview_hits.get(ip, []) if t >= cutoff]
+    if len(hits) >= limit:
+        _preview_hits[ip] = hits
+        return False
+    hits.append(now)
+    _preview_hits[ip] = hits
+    if len(_preview_hits) > 10_000:  # bound memory on a busy/abused instance
+        for k in [k for k, v in _preview_hits.items() if not v or v[-1] < cutoff]:
+            _preview_hits.pop(k, None)
+    return True
 
 
 # ── Download count helpers ────────────────────────────────────────────────────

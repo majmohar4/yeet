@@ -1,1206 +1,1134 @@
 'use strict';
-
-// ── Session ───────────────────────────────────────────────────────────────────
-const SESSION_KEY = 'yeet_session';
-function getSession() {
-  let s = localStorage.getItem(SESSION_KEY);
-  if (!s) {
-    s = crypto.randomUUID
-      ? crypto.randomUUID()
-      : ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
-          (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
-    localStorage.setItem(SESSION_KEY, s);
-  }
-  return s;
-}
-getSession();
-
-// ── State ─────────────────────────────────────────────────────────────────────
-const _cfg         = window.YEET_CONFIG || {};
-let   _allFiles    = [];
-let   _allBundles  = [];
-let   _clipItems   = [];
-let   _expiry      = parseInt(localStorage.getItem('yeet_expiry') || '24', 10);
-let   _pendingDlId = null;
-let   _resultUrl   = '';
-
-// ── DOM refs ──────────────────────────────────────────────────────────────────
-const dropZone       = document.getElementById('drop-zone');
-const dzPrompt       = document.getElementById('dz-prompt');
-const fileInput      = document.getElementById('file-input');
-const dzPassword     = document.getElementById('dz-password');
-const dzGenPw        = document.getElementById('dz-gen-pw');
-const activeUploads  = document.getElementById('active-uploads');
-const uploadResult   = document.getElementById('upload-result');
-const resultUrlEl    = document.getElementById('upload-result-url');
-const fileGrid       = document.getElementById('file-grid');
-const fileCount      = document.getElementById('file-count');
-const searchInput    = document.getElementById('search-input');
-const sortSelect     = document.getElementById('sort-select');
-const deletedSection = document.getElementById('deleted-section');
-const deletedList    = document.getElementById('deleted-list');
-const settingsBtn    = document.getElementById('settings-btn');
-const settingsModal  = document.getElementById('settings-modal');
-const settingsClose  = document.getElementById('settings-close');
-const pwModal        = document.getElementById('pw-modal');
-const pwModalClose   = document.getElementById('pw-modal-close');
-const pwModalInput   = document.getElementById('pw-modal-input');
-const pwSubmit       = document.getElementById('pw-submit');
-const pwError        = document.getElementById('pw-error');
-const toastContainer = document.getElementById('toast-container');
-const fabBtn         = document.getElementById('fab-btn');
-const folderInput    = document.getElementById('folder-input');
-const photoInput     = document.getElementById('photo-input');
-const clipboardPanel = document.getElementById('clipboard-panel');
-const clipboardList  = document.getElementById('clipboard-list');
-const clipboardCount = document.getElementById('clipboard-count');
-const clipboardEmpty = document.getElementById('clipboard-empty');
-const dzBurn         = document.getElementById('dz-burn');
-const quickPaste     = document.getElementById('quick-paste');
-const quickPhoto     = document.getElementById('quick-photo');
-const quickFolder    = document.getElementById('quick-folder');
-const pasteModal     = document.getElementById('paste-modal');
-const pasteClose     = document.getElementById('paste-close');
-const pasteTextarea  = document.getElementById('paste-textarea');
-const pasteSave      = document.getElementById('paste-save');
-const pasteClear     = document.getElementById('paste-clear');
-const pastePickImg   = document.getElementById('paste-pick-img');
-
-// ── Theme + accent system ─────────────────────────────────────────────────────
-const ACCENTS = {
-  cyan:   ['#00D4FF', '#00AACC'],
-  purple: ['#B537F2', '#8E1ED4'],
-  pink:   ['#FF2E97', '#D81B7C'],
-  green:  ['#00F5A0', '#00C97F'],
-  teal:   ['#14B8A6', '#0E8A7B'],
-  blue:   ['#4A90FF', '#2A6FE0'],
-  orange: ['#FF6B35', '#D9551E'],
-  red:    ['#FF3366', '#D6244F'],
-  yellow: ['#FFD60A', '#D9B500'],
-  // Mono follows the active theme — set dynamically in applyAccent.
-  mono:   [null, null],
-};
-
-let _theme  = localStorage.getItem('yeet_theme')  || 'auto';     // auto | light | dark
-let _accent = localStorage.getItem('yeet_accent') || 'cyan';
-
-const _mql = window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null;
-
-function effectiveTheme() {
-  if (_theme === 'auto') return _mql && _mql.matches ? 'light' : 'dark';
-  return _theme;
-}
-
-function applyTheme() {
-  document.documentElement.setAttribute('data-theme', effectiveTheme());
-  applyAccent(_accent);   // mono shifts with theme
-}
-
-function applyAccent(val) {
-  let [a, h] = ACCENTS[val] || ACCENTS.cyan;
-  if (val === 'mono') {
-    const dark = effectiveTheme() === 'dark';
-    a = dark ? '#FFFFFF' : '#1C1C28';
-    h = dark ? '#CCCCCC' : '#44445A';
-  }
-  document.documentElement.style.setProperty('--accent', a);
-  document.documentElement.style.setProperty('--accent-hover', h);
-}
-
-function syncSettingsButtons() {
-  document.querySelectorAll('[data-theme]').forEach(b => {
-    b.classList.toggle('active', b.dataset.theme === _theme);
-  });
-  document.querySelectorAll('[data-accent]').forEach(b => {
-    b.classList.toggle('active', b.dataset.accent === _accent);
-  });
-}
-
-// React to OS theme changes when in auto mode
-if (_mql) {
-  const onChange = () => { if (_theme === 'auto') applyTheme(); };
-  if (_mql.addEventListener) _mql.addEventListener('change', onChange);
-  else _mql.addListener(onChange);
-}
-
-applyTheme();
-syncSettingsButtons();
-
-// ── Expiry chips ──────────────────────────────────────────────────────────────
-(function initChips() {
-  const maxH = _cfg.expiryHours || 24;
-
-  // Cap stored preference at server max
-  if (_expiry > maxH) { _expiry = maxH; localStorage.setItem('yeet_expiry', String(_expiry)); }
-
-  let anyVisible = false;
-  document.querySelectorAll('.chip[data-hours]').forEach(btn => {
-    const h = parseInt(btn.dataset.hours, 10);
-    if (h > maxH) { btn.style.display = 'none'; return; }
-    anyVisible = true;
-    if (h === _expiry) btn.classList.add('active');
-    btn.addEventListener('click', e => {
-      e.stopPropagation();
-      document.querySelectorAll('.chip[data-hours]').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      _expiry = h;
-      localStorage.setItem('yeet_expiry', String(_expiry));
-    });
-  });
-
-  // Activate the largest visible chip if none match saved preference
-  if (!document.querySelector('.chip.active')) {
-    const chips = [...document.querySelectorAll('.chip[data-hours]')].filter(b => b.style.display !== 'none');
-    const best  = chips.reduce((a, b) => parseInt(b.dataset.hours,10) > parseInt(a.dataset.hours,10) ? b : a, chips[0] || null);
-    if (best) { best.classList.add('active'); _expiry = parseInt(best.dataset.hours, 10); }
-  }
-})();
-
-// ── Password generator ────────────────────────────────────────────────────────
-if (dzGenPw) {
-  dzGenPw.addEventListener('click', e => {
-    e.stopPropagation();
-    const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789!@#$%&';
-    const arr = crypto.getRandomValues(new Uint8Array(14));
-    const pw = Array.from(arr, b => chars[b % chars.length]).join('');
-    if (dzPassword) { dzPassword.value = pw; dzPassword.type = 'text'; setTimeout(() => { dzPassword.type = 'password'; }, 2500); }
-    navigator.clipboard.writeText(pw).catch(() => {});
-    toast('Password generated & copied', 'success');
-  });
-}
-
-// ── Drop zone interactions ────────────────────────────────────────────────────
-if (dropZone) {
-  // Click to browse — ignore clicks on controls
-  dropZone.addEventListener('click', e => {
-    if (e.target.closest('#dz-controls')) return;
-    fileInput && fileInput.click();
-  });
-  dropZone.addEventListener('keydown', e => {
-    if ((e.key === 'Enter' || e.key === ' ') && e.target === dropZone) fileInput && fileInput.click();
-  });
-
-  // Drag
-  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-  dropZone.addEventListener('dragleave', e => { if (!dropZone.contains(e.relatedTarget)) dropZone.classList.remove('drag-over'); });
-  dropZone.addEventListener('drop', async e => {
-    e.preventDefault(); dropZone.classList.remove('drag-over');
-
-    const looseFiles = [];
-    const folderEntries = [];
-    if (e.dataTransfer.items) {
-      for (const item of Array.from(e.dataTransfer.items)) {
-        if (item.kind !== 'file') continue;
-        const entry = typeof item.webkitGetAsEntry === 'function' ? item.webkitGetAsEntry() : null;
-        if (entry && entry.isDirectory) { folderEntries.push(entry); continue; }
-        const f = item.getAsFile();
-        if (!f) continue;
-        if (!(await _probeReadable(f))) continue;
-        looseFiles.push(f);
-      }
-    } else {
-      for (const f of Array.from(e.dataTransfer.files)) {
-        if (!(await _probeReadable(f))) continue;
-        looseFiles.push(f);
-      }
-    }
-
-    // Folders → bundle uploads
-    for (const entry of folderEntries) {
-      const collected = await _walkDirectory(entry, entry.name);
-      if (collected.length) await uploadBundle(collected, entry.name);
-      else toast('Empty folder — nothing to upload', 'warn');
-    }
-
-    if (looseFiles.length) await uploadFiles(looseFiles);
-  });
-}
-
-if (fileInput) {
-  fileInput.addEventListener('change', async () => {
-    const files = Array.from(fileInput.files);
-    fileInput.value = '';
-    if (files.length) await uploadFiles(files);
-  });
-}
-
-if (fabBtn) fabBtn.addEventListener('click', () => fileInput && fileInput.click());
-
-// ── Global paste detection ────────────────────────────────────────────────────
-document.addEventListener('paste', async e => {
-  if (!dropZone) return;
-  const active = document.activeElement;
-  if (active && ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName)) return;
-
-  e.preventDefault();
-  const items = Array.from(e.clipboardData.items);
-
-  // Image → save as clipboard image (lives in the clipboard manager).
-  // Hold Shift when pasting to upload as a regular file instead.
-  const imgItem = items.find(i => i.type.startsWith('image/'));
-  if (imgItem) {
-    const blob = imgItem.getAsFile();
-    const ext  = imgItem.type.split('/')[1] || 'png';
-    if (e.shiftKey) {
-      await uploadFiles([new File([blob], `pasted-image.${ext}`, { type: imgItem.type })]);
-    } else {
-      await saveClipboardImage(blob, imgItem.type);
-    }
-    return;
-  }
-
-  // Text → save as clipboard snippet (readable at /c/{id})
-  const stringItems = items.filter(i => i.kind === 'string');
-  const txtItem = stringItems.find(i => i.type === 'text/plain');
-  if (txtItem) {
-    const text = await new Promise(r => txtItem.getAsString(r));
-    if (!text.trim()) return;
-    await saveClipboardSnippet(text);
-  }
-});
-
-async function saveClipboardImage(blob, mime) {
-  try {
-    const dataUrl = await new Promise((res, rej) => {
-      const fr = new FileReader();
-      fr.onload  = () => res(fr.result);
-      fr.onerror = () => rej(fr.error);
-      fr.readAsDataURL(blob);
-    });
-    const expiryMinutes = _expiry * 60;
-    const r = await fetch('/api/clipboard/paste', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        content_type: 'image',
-        content: dataUrl,
-        expiry_minutes: expiryMinutes,
-        session_id: getSession(),
-      }),
-    });
-    const data = await r.json();
-    if (r.status === 201) {
-      _resultUrl = data.share_url;
-      if (resultUrlEl) resultUrlEl.textContent = data.share_url;
-      if (uploadResult) uploadResult.classList.remove('hidden');
-      navigator.clipboard.writeText(data.share_url).catch(() => {});
-      toast('Image saved — link copied! (Shift+V to upload as file)', 'success');
-      if (clipboardPanel) clipboardPanel.open = true;
-      await loadClipboardItems();
-    } else {
-      toast(data.error || 'Failed to save image', 'error');
-    }
-  } catch {
-    toast('Failed to save clipboard image', 'error');
-  }
-}
-
-async function saveClipboardSnippet(text) {
-  try {
-    const expiryMinutes = _expiry * 60;
-    const r = await fetch('/api/clipboard/paste', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        content_type: 'text',
-        content: text,
-        expiry_minutes: expiryMinutes,
-        session_id: getSession(),
-      }),
-    });
-    const data = await r.json();
-    if (r.status === 201) {
-      _resultUrl = data.share_url;
-      if (resultUrlEl) resultUrlEl.textContent = data.share_url;
-      if (uploadResult) uploadResult.classList.remove('hidden');
-      navigator.clipboard.writeText(data.share_url).catch(() => {});
-      toast('Text saved — link copied!', 'success');
-      if (clipboardPanel) clipboardPanel.open = true;
-      await loadClipboardItems();
-    } else {
-      toast(data.error || 'Failed to save text', 'error');
-    }
-  } catch {
-    toast('Failed to save clipboard text', 'error');
-  }
-}
-
-// ── Folder upload ─────────────────────────────────────────────────────────────
-if (quickFolder && folderInput) {
-  quickFolder.addEventListener('click', e => {
-    e.stopPropagation();
-    folderInput.click();
-  });
-}
-if (folderInput) {
-  folderInput.addEventListener('change', async () => {
-    const files = Array.from(folderInput.files);
-    folderInput.value = '';
-    if (!files.length) return;
-    // The browser provides webkitRelativePath ("root/sub/file.txt") for folder
-    // selections — that becomes our bundle path.
-    const collected = files.map(f => ({
-      file: f,
-      path: f.webkitRelativePath || f.name,
-    }));
-    const root = (collected[0].path.split('/')[0]) || 'folder';
-    await uploadBundle(collected, root);
-  });
-}
-
-// ── Photo picker (camera or photo library) ────────────────────────────────────
-if (quickPhoto && photoInput) {
-  quickPhoto.addEventListener('click', e => {
-    e.stopPropagation();
-    photoInput.click();
-  });
-  photoInput.addEventListener('change', async () => {
-    const files = Array.from(photoInput.files);
-    photoInput.value = '';
-    if (!files.length) return;
-    // Single image → save as clipboard image so it lives in the manager.
-    const f = files[0];
-    if (f.type && f.type.startsWith('image/')) {
-      await saveClipboardImage(f, f.type);
-    } else {
-      await uploadFiles(files);
-    }
-  });
-}
-
-// ── Paste modal (mobile/tablet helper) ────────────────────────────────────────
-function openPasteModal() {
-  if (!pasteModal) return;
-  pasteModal.classList.remove('hidden');
-  setTimeout(() => pasteTextarea?.focus(), 60);
-  // Try the async clipboard API first — works on https origins after a user
-  // gesture, even on Android Chrome and iOS 14+ Safari.
-  tryPrefillFromClipboard();
-}
-function closePasteModal() {
-  if (!pasteModal) return;
-  pasteModal.classList.add('hidden');
-  if (pasteTextarea) pasteTextarea.value = '';
-}
-
-async function tryPrefillFromClipboard() {
-  if (!navigator.clipboard) return;
-  // Prefer rich (image) clipboard when available
-  if (navigator.clipboard.read) {
-    try {
-      const items = await navigator.clipboard.read();
-      for (const it of items) {
-        const imgType = it.types.find(t => t.startsWith('image/'));
-        if (imgType) {
-          const blob = await it.getType(imgType);
-          closePasteModal();
-          await saveClipboardImage(blob, imgType);
-          return;
-        }
-      }
-    } catch { /* fall through to text */ }
-  }
-  if (navigator.clipboard.readText) {
-    try {
-      const txt = await navigator.clipboard.readText();
-      if (txt && pasteTextarea) {
-        pasteTextarea.value = txt;
-      }
-    } catch { /* user denied / not allowed */ }
-  }
-}
-
-if (quickPaste) {
-  quickPaste.addEventListener('click', e => {
-    e.stopPropagation();
-    openPasteModal();
-  });
-}
-if (pasteClose)  pasteClose.addEventListener('click', closePasteModal);
-if (pasteModal)  pasteModal.addEventListener('click', e => { if (e.target === pasteModal) closePasteModal(); });
-if (pasteClear)  pasteClear.addEventListener('click', () => { if (pasteTextarea) pasteTextarea.value = ''; pasteTextarea?.focus(); });
-if (pastePickImg) pastePickImg.addEventListener('click', () => { closePasteModal(); photoInput?.click(); });
-if (pasteSave) {
-  pasteSave.addEventListener('click', async () => {
-    const txt = (pasteTextarea?.value || '').trim();
-    if (!txt) { toast('Nothing to save', 'warn'); pasteTextarea?.focus(); return; }
-    pasteSave.disabled = true; pasteSave.textContent = 'Saving…';
-    try { await saveClipboardSnippet(txt); }
-    finally { pasteSave.disabled = false; pasteSave.textContent = 'Save text'; closePasteModal(); }
-  });
-}
-// Pasting directly inside the textarea — intercept image paste to upload it
-if (pasteTextarea) {
-  pasteTextarea.addEventListener('paste', async e => {
-    const items = e.clipboardData ? Array.from(e.clipboardData.items) : [];
-    const img = items.find(i => i.type && i.type.startsWith('image/'));
-    if (img) {
-      e.preventDefault();
-      const blob = img.getAsFile();
-      if (blob) { closePasteModal(); await saveClipboardImage(blob, img.type); }
-    }
-    // text falls through to default behaviour
-  });
-}
-
-async function _walkDirectory(entry, rootPath = '') {
-  const out = [];
-  async function walk(e, prefix) {
-    if (e.isFile) {
-      const f = await new Promise(res => e.file(res, () => res(null)));
-      if (f) out.push({ file: f, path: prefix });
-    } else if (e.isDirectory) {
-      const reader = e.createReader();
-      const entries = await new Promise(res => {
-        const all = [];
-        const read = () => reader.readEntries(batch => {
-          if (!batch.length) return res(all);
-          all.push(...batch);
-          read();
-        }, () => res(all));
-        read();
-      });
-      for (const child of entries) {
-        await walk(child, prefix + '/' + child.name);
-      }
-    }
-  }
-  await walk(entry, rootPath);
-  return out;
-}
-
-async function uploadBundle(items, displayName) {
-  if (_cfg.storageBlocked) { toast('Storage full — uploads disabled', 'error'); return; }
-  if (!items.length) return;
-
-  const uid = 'b' + Math.random().toString(36).slice(2, 8);
-  const totalSize = items.reduce((s, it) => s + (it.file.size || 0), 0);
-  const progEl = mkProgressEl(uid, `📁 ${displayName} (${items.length} files)`, totalSize);
-  if (activeUploads) { activeUploads.appendChild(progEl); activeUploads.style.display = ''; }
-
-  const fd = new FormData();
-  for (const it of items) fd.append('files', it.file, it.file.name);
-  fd.append('paths', items.map(it => it.path).join('\n'));
-  fd.append('name', displayName || '');
-  fd.append('password', dzPassword ? dzPassword.value : '');
-  fd.append('expiry_hours', String(_expiry));
-  fd.append('session_id', getSession());
-
-  return new Promise(resolve => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', '/upload-bundle');
-    xhr.upload.onprogress = ev => {
-      if (ev.lengthComputable) setProgress(uid, Math.round(ev.loaded / ev.total * 100));
-    };
-    xhr.onload = async () => {
-      const json = safeJson(xhr.responseText);
-      if (xhr.status === 201) {
-        doneProgress(uid);
-        _resultUrl = json.url || '';
-        if (resultUrlEl) resultUrlEl.textContent = json.url;
-        if (uploadResult) uploadResult.classList.remove('hidden');
-        navigator.clipboard.writeText(json.url).catch(() => {});
-        toast(`Folder uploaded (${json.file_count} files) — link copied!`, 'success');
-        loadFileList();
-      } else {
-        failProgress(uid);
-        toast(json.error || 'Folder upload failed', 'error');
-      }
-      setTimeout(() => removeProgress(uid), 3500);
-      resolve(json);
-    };
-    xhr.onerror = () => { failProgress(uid); toast('Upload failed: network error', 'error'); resolve({}); };
-    xhr.send(fd);
-  });
-}
-
-// Returns false when the browser can't read the file (directories cause a NotReadableError)
-function _probeReadable(file) {
-  return new Promise(resolve => {
-    const r = new FileReader();
-    r.onload  = () => resolve(true);
-    r.onerror = () => resolve(false);
-    try {
-      // slice(0,4) of a 0-byte File (dropped directory) returns an empty Blob
-      // that fires onload instead of onerror — read the raw File in that case.
-      r.readAsArrayBuffer(file.size > 0 ? file.slice(0, 4) : file);
-    } catch {
-      resolve(false);
-    }
-  });
-}
-
-// ── Upload ────────────────────────────────────────────────────────────────────
-async function uploadFiles(files) {
-  if (_cfg.storageBlocked) { toast('Storage full — uploads disabled', 'error'); return; }
-  for (const f of files) await uploadSingle(f);
-}
-
-async function uploadSingle(file) {
-  const uid = 'u' + Math.random().toString(36).slice(2, 8);
-  const pw  = dzPassword ? dzPassword.value : '';
-
-  // Progress element
-  const progEl = mkProgressEl(uid, file.name, file.size);
-  if (activeUploads) { activeUploads.appendChild(progEl); activeUploads.style.display = ''; }
-
-  const fd = new FormData();
-  fd.append('file', file);
-  fd.append('password', pw);
-  fd.append('expiry_hours', String(_expiry));
-  fd.append('session_id', getSession());
-  if (dzBurn && dzBurn.checked) fd.append('burn', '1');
-
-  return new Promise(resolve => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', '/upload');
-    xhr.upload.onprogress = ev => {
-      if (ev.lengthComputable) setProgress(uid, Math.round(ev.loaded / ev.total * 100));
-    };
-    xhr.onload = async () => {
-      const json = safeJson(xhr.responseText);
-      if (xhr.status === 201) {
-        doneProgress(uid);
-        _resultUrl = json.url || '';
-        if (resultUrlEl) resultUrlEl.textContent = json.url;
-        if (uploadResult) uploadResult.classList.remove('hidden');
-        navigator.clipboard.writeText(json.url).catch(() => {});
-        toast('Uploaded — link copied!', 'success');
-        if (json.warning)  toast('⚠ ' + json.warning,  'warn');
-        if (json.advisory) toast('⚠ ' + json.advisory, 'warn');
-        loadFileList();
-      } else {
-        failProgress(uid);
-        toast(json.error || 'Upload failed', 'error');
-      }
-      setTimeout(() => removeProgress(uid), 3000);
-      resolve(json);
-    };
-    xhr.onerror = () => { failProgress(uid); toast('Upload failed: network error', 'error'); resolve({}); };
-    xhr.send(fd);
-  });
-}
-
-function safeJson(text) { try { return JSON.parse(text); } catch { return {}; } }
-
-// ── Progress helpers ──────────────────────────────────────────────────────────
-function mkProgressEl(uid, name, size) {
-  const d = document.createElement('div');
-  d.className = 'upload-progress';
-  d.dataset.uid = uid;
-  d.innerHTML = `<div class="upload-progress-info">
-    <span class="upload-progress-icon">${fileIcon(name)}</span>
-    <span class="upload-progress-name">${esc(name)}</span>
-    <span class="upload-progress-pct" id="pct-${uid}">0%</span>
-  </div>
-  <div class="upload-progress-bar"><div class="upload-progress-fill" id="fill-${uid}" style="width:0"></div></div>`;
-  return d;
-}
-function setProgress(uid, pct) {
-  const fill = document.getElementById('fill-' + uid);
-  const label = document.getElementById('pct-' + uid);
-  if (fill)  fill.style.width  = pct + '%';
-  if (label) label.textContent = pct + '%';
-}
-function doneProgress(uid) {
-  const el = document.querySelector(`[data-uid="${uid}"]`);
-  if (!el) return;
-  el.classList.add('done');
-  setProgress(uid, 100);
-  const label = document.getElementById('pct-' + uid);
-  if (label) label.textContent = '✓';
-}
-function failProgress(uid) {
-  const el = document.querySelector(`[data-uid="${uid}"]`);
-  if (el) el.classList.add('failed');
-  const label = document.getElementById('pct-' + uid);
-  if (label) label.textContent = '✗';
-}
-function removeProgress(uid) {
-  const el = document.querySelector(`[data-uid="${uid}"]`);
-  if (!el) return;
-  el.style.opacity = '0';
-  el.style.transition = 'opacity 300ms';
-  setTimeout(() => {
-    el.remove();
-    if (activeUploads && !activeUploads.querySelector('.upload-progress')) activeUploads.style.display = 'none';
-  }, 320);
-}
-
-function copyResult() {
-  if (!_resultUrl) return;
-  navigator.clipboard.writeText(_resultUrl).then(() => {
-    const btn = document.getElementById('upload-result-copy');
-    if (btn) { btn.textContent = 'copied!'; setTimeout(() => { btn.textContent = 'copy'; }, 2000); }
-  });
-}
-function dismissResult() { if (uploadResult) uploadResult.classList.add('hidden'); }
-
-// ── File list ─────────────────────────────────────────────────────────────────
-async function loadFileList() {
-  try {
-    const r = await fetch('/api/files/all');
-    const data = await r.json();
-    _allFiles   = data.files   || [];
-    _allBundles = data.bundles || [];
-    renderFiles();
-  } catch {
-    if (fileGrid) fileGrid.innerHTML = '<div class="empty-state"><div class="empty-title">Failed to load files</div></div>';
-  }
-}
-
-function renderFiles() {
-  if (!fileGrid) return;
-  const q    = (searchInput?.value || '').toLowerCase();
-  const sort = sortSelect?.value || 'recent';
-  const me   = getSession();
-
-  // Unified list: bundles + loose files, both annotated with .__kind so the
-  // renderer can branch.
-  const fileItems   = _allFiles.map(f => ({ ...f, __kind: 'file', __sortName: f.orig_name }));
-  const bundleItems = _allBundles.map(b => ({ ...b, __kind: 'bundle', __sortName: b.name, file_size: b.total_size, orig_name: b.name }));
-  let list = [...bundleItems, ...fileItems].filter(it => !q || it.__sortName.toLowerCase().includes(q));
-
-  list.sort((a, b) => {
-    if (sort === 'recent') return new Date(b.created_at) - new Date(a.created_at);
-    if (sort === 'expiry') return new Date(a.expires_at) - new Date(b.expires_at);
-    if (sort === 'size')   return (b.file_size || 0) - (a.file_size || 0);
-    if (sort === 'name')   return a.__sortName.localeCompare(b.__sortName);
-    return 0;
-  });
-
-  if (fileCount) fileCount.textContent = list.length;
-
-  if (!list.length) {
-    fileGrid.innerHTML = `<div class="empty-state">
-      <div class="empty-icon">📂</div>
-      <div class="empty-title">${q ? `No results for "${esc(q)}"` : 'No files yet'}</div>
-      <div class="empty-sub">${q ? 'Try a different search term' : 'Drop files or a folder above, or paste Ctrl+V'}</div>
-    </div>`;
-    return;
-  }
-
-  const isOwn     = f => f.uploader_session && f.uploader_session === me;
-  const isImg     = f => f.mime_type && f.mime_type.startsWith('image/');
-  const isText    = f => (f.mime_type || '').startsWith('text/') || /\.(txt|md)$/i.test(f.orig_name);
-  const canInline = f => /\.(jpg|jpeg|png|gif|webp|avif|pdf|mp4|webm|mov|mp3|wav|ogg|m4a|txt|md|json|py|js|ts|go|rs)$/i.test(f.orig_name);
-
-  fileGrid.innerHTML = list.map(f => {
-    if (f.__kind === 'bundle') {
-      const exp     = fmtExpiry(f.expires_at);
-      const own     = isOwn(f);
-      const dlBtn   = `<a class="icon-btn" href="/b/${esc(f.id)}/zip" title="Download zip">⬇</a>`;
-      const linkBtn = `<button class="icon-btn" data-action="copybundlelink" data-id="${esc(f.id)}" title="Copy link">🔗</button>`;
-      const delBtn  = own ? `<button class="icon-btn danger" data-action="deletebundle" data-id="${esc(f.id)}" title="Delete folder">🗑</button>` : '';
-      return `<div class="file-card bundle-card${f.has_password ? ' protected' : ''}" id="bcard-${esc(f.id)}" data-bundle-id="${esc(f.id)}">
-        <a class="card-thumb type-bundle" href="/b/${esc(f.id)}" style="text-decoration:none">
-          <div class="card-thumb-icon" style="font-size:38px">📁</div>
-          <div class="bundle-card-count">${f.file_count} files</div>
-        </a>
-        <div class="card-body">
-          <div class="card-name" title="${esc(f.name)}">${esc(f.name)}</div>
-          <div class="card-meta">
-            <span class="card-size">${fmtSize(f.total_size || 0)}</span>
-            <span class="card-expiry ${exp.cls}">${exp.label}</span>
-          </div>
-        </div>
-        <div class="card-actions">${dlBtn}${linkBtn}${delBtn}</div>
-      </div>`;
-    }
-    const exp      = fmtExpiry(f.expires_at);
-    const type     = cardType(f);
-    const thumb    = isImg(f)
-      ? `<img src="/raw/${esc(f.id)}" alt="${esc(f.orig_name)}" loading="lazy">`
-      : isText(f)
-        ? `<div class="card-thumb-text" data-text-id="${esc(f.id)}" style="overflow:hidden;padding:8px 10px;font-size:10px;line-height:1.5;white-space:pre-wrap;word-break:break-word;color:var(--text-2,rgba(255,255,255,.55));text-align:left;font-family:monospace;cursor:pointer">…</div>`
-        : `<div class="card-thumb-icon">${fileIcon(f.orig_name)}</div>`;
-    const own      = isOwn(f);
-    const pwAttr   = f.has_password ? '1' : '0';
-    const preBtn   = canInline(f) ? `<button class="icon-btn" data-action="preview" data-id="${esc(f.id)}" data-pw="${pwAttr}" title="Preview">👁</button>` : '';
-    const dlBtn    = `<button class="icon-btn" data-action="download" data-id="${esc(f.id)}" data-pw="${pwAttr}" title="Download">⬇</button>`;
-    const linkBtn  = `<button class="icon-btn" data-action="copylink" data-id="${esc(f.id)}" title="Copy link">🔗</button>`;
-    const delBtn   = own ? `<button class="icon-btn danger" data-action="delete" data-id="${esc(f.id)}" title="Delete">🗑</button>` : '';
-    const scanBadge = f.scan_status === 'pending' ? `<div><span class="scan-badge">scanning</span></div>` : '';
-    const burnBadge = f.burn_after_read ? `<span class="burn-badge" title="Burn after read — deletes after first download">🔥 burn</span>` : '';
-    const dangerBadge = f.dangerous ? `<span class="danger-badge" title="Executable or script — only run files from sources you trust">⚠ executable</span>` : '';
-    const webBadge = (!f.dangerous && f.web_renderable) ? `<span class="web-badge" title="Browser-renderable type — yeet shows source, never executes">📄 source</span>` : '';
-
-    return `<div class="file-card${f.has_password ? ' protected' : ''}${f.burn_after_read ? ' burn' : ''}${f.dangerous ? ' danger' : ''}" id="card-${esc(f.id)}">
-      <div class="card-thumb type-${type}">${thumb}</div>
-      <div class="card-body">
-        <div class="card-name" title="${esc(f.orig_name)}">${esc(f.orig_name)}${burnBadge}${dangerBadge}${webBadge}</div>
-        <div class="card-meta">
-          <span class="card-size">${fmtSize(f.file_size)}</span>
-          <span class="card-expiry ${exp.cls}">${exp.label}</span>
-        </div>
-        ${scanBadge}
-      </div>
-      <div class="card-actions">${preBtn}${dlBtn}${linkBtn}${delBtn}</div>
-    </div>`;
-  }).join('');
-
-  // Async-populate text-snippet thumbnails so the content is visible on the card
-  fileGrid.querySelectorAll('[data-text-id]').forEach(el => {
-    fetch(`/raw/${el.dataset.textId}`)
-      .then(r => r.ok ? r.text() : Promise.reject())
-      .then(t => { el.textContent = t.trim().slice(0, 400) || '(empty)'; })
-      .catch(() => { el.innerHTML = `<div class="card-thumb-icon">📝</div>`; });
-  });
-}
-
-function cardType(f) {
-  const m = f.mime_type || '';
-  const n = (f.orig_name || '').toLowerCase();
-  if (m.startsWith('image/')) return 'image';
-  if (m.startsWith('video/')) return 'video';
-  if (m.startsWith('audio/')) return 'audio';
-  if (m === 'application/pdf' || /\.(doc|docx|pdf|txt|md|odt|rtf)$/.test(n)) return 'doc';
-  if (/\.(zip|tar|gz|rar|7z|bz2|xz)$/.test(n)) return 'archive';
-  if (/\.(py|js|ts|go|rs|java|cpp|c|css|sql|rb|php|swift|kt)$/.test(n)) return 'code';
-  if (/\.(json|xml|yaml|yml|toml|csv|xls|xlsx|ods)$/.test(n)) return 'data';
-  return 'other';
-}
-
-// ── File grid events ──────────────────────────────────────────────────────────
-if (fileGrid) {
-  fileGrid.addEventListener('click', async e => {
-    const btn    = e.target.closest('[data-action]');
-    const action = btn?.dataset?.action;
-
-    if (action === 'preview') {
-      const { id, pw } = btn.dataset;
-      if (pw === '1') { openPwModal(id); return; }
-      const f = _allFiles.find(x => x.id === id);
-      if (f) showPreviewModal(f);
-      return;
-    }
-    if (action === 'download') {
-      const { id, pw } = btn.dataset;
-      if (pw === '1') { openPwModal(id); return; }
-      window.open(`/f/${id}`, '_blank', 'noopener');
-      return;
-    }
-    if (action === 'copylink') {
-      await navigator.clipboard.writeText(`${location.origin}/f/${btn.dataset.id}`);
-      toast('Link copied', 'success');
-      return;
-    }
-    if (action === 'copybundlelink') {
-      await navigator.clipboard.writeText(`${location.origin}/b/${btn.dataset.id}`);
-      toast('Folder link copied', 'success');
-      return;
-    }
-    if (action === 'delete') {
-      await deleteFile(btn.dataset.id);
-      return;
-    }
-    if (action === 'deletebundle') {
-      await deleteBundle(btn.dataset.id);
-      return;
-    }
-
-    // No btn or unrecognized action → treat as card-body click
-    const card = e.target.closest('.file-card');
-    if (!card) return;
-    const id = card.id.replace(/^card-/, '');
-    const f  = _allFiles.find(x => x.id === id);
-    if (!f) return;
-    if (f.has_password) { openPwModal(id); return; }
-    const canInline = /\.(jpg|jpeg|png|gif|webp|avif|pdf|mp4|webm|mov|mp3|wav|ogg|m4a|txt|md|json|py|js|ts|go|rs)$/i.test(f.orig_name);
-    if (canInline) { showPreviewModal(f); return; }
-    window.open(`/f/${id}`, '_blank', 'noopener');
-  });
-}
-
-async function deleteFile(id) {
-  if (!confirm('Delete this file permanently?')) return;
-  try {
-    const r = await fetch(`/api/files/${id}`, { method: 'DELETE', headers: { 'X-Session-ID': getSession() } });
-    if (r.ok) {
-      _allFiles = _allFiles.filter(f => f.id !== id);
-      const card = document.getElementById(`card-${id}`);
-      if (card) { card.style.transition = 'opacity 240ms, transform 240ms'; card.style.opacity = '0'; card.style.transform = 'scale(0.92)'; setTimeout(() => { card.remove(); if (fileCount) fileCount.textContent = _allFiles.filter(f => !document.getElementById('search-input')?.value || f.orig_name.toLowerCase().includes(document.getElementById('search-input').value.toLowerCase())).length; }, 260); }
-      toast('File deleted', 'warn');
-    } else {
-      const j = await r.json().catch(() => ({}));
-      toast(j.error || 'Delete failed', 'error');
-    }
-  } catch { toast('Delete failed: network error', 'error'); }
-}
-
-async function deleteBundle(id) {
-  if (!confirm('Delete this folder and all its files?')) return;
-  try {
-    const r = await fetch(`/api/bundles/${id}`, { method: 'DELETE', headers: { 'X-Session-ID': getSession() } });
-    if (r.ok) {
-      _allBundles = _allBundles.filter(b => b.id !== id);
-      const card = document.getElementById(`bcard-${id}`);
-      if (card) { card.style.transition = 'opacity 240ms, transform 240ms'; card.style.opacity = '0'; card.style.transform = 'scale(0.92)'; setTimeout(() => card.remove(), 260); }
-      toast('Folder deleted', 'warn');
-      renderFiles();
-    } else {
-      const j = await r.json().catch(() => ({}));
-      toast(j.error || 'Delete failed', 'error');
-    }
-  } catch { toast('Delete failed: network error', 'error'); }
-}
-
-// ── Clipboard manager ─────────────────────────────────────────────────────────
-async function loadClipboardItems() {
-  if (!clipboardList) return;
-  try {
-    const r = await fetch('/api/clipboard/recent?limit=50', {
-      headers: { 'X-Session-ID': getSession() },
-    });
-    const data = await r.json();
-    _clipItems = data.items || [];
-    renderClipboard();
-  } catch {
-    /* swallow */
-  }
-}
-
-function renderClipboard() {
-  if (!clipboardList) return;
-  if (clipboardCount) clipboardCount.textContent = _clipItems.length;
-  if (clipboardEmpty) clipboardEmpty.classList.toggle('hidden', _clipItems.length > 0);
-
-  clipboardList.innerHTML = _clipItems.map(it => {
-    const isImg = it.type === 'image';
-    const preview = isImg
-      ? `<img class="clip-thumb-img" src="/api/clipboard/image/${esc(it.id)}" alt="">`
-      : `<pre class="clip-thumb-text">${esc((it.preview || '').slice(0, 240))}</pre>`;
-    const pinned = it.pinned ? '📌' : '☆';
-    const t = timeAgo(it.created_at);
-    const exp = it.pinned ? 'pinned' : fmtExpiry(it.expires_at).label;
-    const yours = it.is_yours;
-    const youBadge = yours ? `<span class="clip-you" title="You posted this">you</span>` : '';
-    const ownerActions = yours
-      ? `<button class="icon-btn" data-clip-action="pin" title="${it.pinned ? 'Unpin' : 'Pin'}">${pinned}</button>
-         <button class="icon-btn danger" data-clip-action="delete" title="Delete">🗑</button>`
-      : '';
-    return `<div class="clip-item${it.pinned ? ' pinned' : ''}${yours ? ' yours' : ''}" data-clip-id="${esc(it.id)}">
-      <div class="clip-thumb">${preview}</div>
-      <div class="clip-body">
-        <div class="clip-meta">
-          <span class="clip-type">${isImg ? '🖼 image' : '📝 text'}</span>
-          ${youBadge}
-          <span class="clip-time">${t}</span>
-          <span class="clip-exp">${exp}</span>
-        </div>
-      </div>
-      <div class="clip-actions">
-        <button class="icon-btn" data-clip-action="open" title="Open">↗</button>
-        <button class="icon-btn" data-clip-action="copy" title="Copy ${isImg ? 'link' : 'text'}">⎘</button>
-        ${ownerActions}
-      </div>
-    </div>`;
-  }).join('');
-}
-
-if (clipboardList) {
-  clipboardList.addEventListener('click', async e => {
-    const btn = e.target.closest('[data-clip-action]');
-    if (!btn) return;
-    const row = btn.closest('[data-clip-id]');
-    const id = row?.dataset.clipId;
-    if (!id) return;
-    const action = btn.dataset.clipAction;
-    const item = _clipItems.find(x => x.id === id);
-    const url = `${location.origin}/c/${id}`;
-
-    if (action === 'open') { window.open(url, '_blank', 'noopener'); return; }
-    if (action === 'copy') {
-      if (item && item.type === 'text') {
-        try {
-          const r = await fetch(`/c/${id}/raw`);
-          const t = await r.text();
-          await navigator.clipboard.writeText(t);
-          toast('Text copied', 'success');
-        } catch { toast('Copy failed', 'error'); }
-      } else {
-        await navigator.clipboard.writeText(url);
-        toast('Link copied', 'success');
-      }
-      return;
-    }
-    if (action === 'pin') {
-      const r = await fetch(`/api/clipboard/pin/${id}`, {
-        method: 'POST',
-        headers: { 'X-Session-ID': getSession() },
-      });
-      if (r.ok) { await loadClipboardItems(); }
-      else { toast('Pin failed', 'error'); }
-      return;
-    }
-    if (action === 'delete') {
-      if (!confirm('Delete this clipboard item?')) return;
-      const r = await fetch(`/api/clipboard/item/${id}`, {
-        method: 'DELETE',
-        headers: { 'X-Session-ID': getSession() },
-      });
-      if (r.ok) {
-        _clipItems = _clipItems.filter(x => x.id !== id);
-        renderClipboard();
-        toast('Deleted', 'warn');
-      } else {
-        toast('Delete failed', 'error');
-      }
-      return;
-    }
-  });
-}
-
-// ── Preview modal ─────────────────────────────────────────────────────────────
-function showPreviewModal(f) {
-  const mime = f.mime_type || '';
-  const name = f.orig_name || '';
-  const id   = f.id;
-  const isText = mime.startsWith('text/') || /\.(txt|md|json|yaml|yml|toml|csv|py|js|ts|go|rs|java|cpp|c|css|sql|rb|php|swift|kt)$/i.test(name);
-
-  // PDFs can't be embedded — server sends frame-ancestors: none which blocks <embed>/<iframe>
-  if (mime === 'application/pdf') {
-    window.open(`/raw/${id}`, '_blank', 'noopener');
-    return;
-  }
-
-  let bodyHtml;
-  if (mime.startsWith('image/'))   bodyHtml = `<img src="/raw/${esc(id)}" alt="${esc(name)}" class="preview-media-img">`;
-  else if (mime.startsWith('video/')) bodyHtml = `<video src="/raw/${esc(id)}" controls class="preview-media-video"></video>`;
-  else if (mime.startsWith('audio/')) bodyHtml = `<div class="preview-audio-wrap"><audio src="/raw/${esc(id)}" controls class="preview-media-audio"></audio></div>`;
-  else if (isText) bodyHtml = `<div class="preview-loading" id="preview-text-body">Loading…</div>`;
-  else bodyHtml = `<div class="preview-unavailable"><div style="font-size:38px;margin-bottom:12px">${fileIcon(name)}</div><p>No preview available</p><p style="font-size:12px;color:var(--text-3);margin-top:6px">Use the download button</p></div>`;
-
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay';
-  overlay.innerHTML = `<div class="modal-box preview-modal-box">
-    <div class="modal-header">
-      <span class="modal-title" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</span>
-      <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
-        <a href="/f/${esc(id)}" class="btn-ghost" style="font-size:12px;height:28px;padding:0 10px">⬇ Download</a>
-        <button class="modal-close" id="_pv-close">✕</button>
-      </div>
-    </div>
-    <div class="preview-modal-body">${bodyHtml}</div>
-  </div>`;
-  document.body.appendChild(overlay);
-  overlay.querySelector('#_pv-close').onclick = () => overlay.remove();
-  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-
-  if (isText) {
-    fetch(`/raw/${id}`)
-      .then(r => { if (!r.ok) throw new Error(r.status); return r.text(); })
-      .then(txt => {
-        const el = overlay.querySelector('#preview-text-body');
-        if (el) { el.outerHTML = `<pre class="preview-text-content">${esc(txt.slice(0, 100_000))}</pre>`; }
-      })
-      .catch(() => {
-        const el = overlay.querySelector('#preview-text-body');
-        if (el) el.innerHTML = '<div class="preview-unavailable"><p>Could not load preview</p><p style="font-size:12px;color:var(--text-3);margin-top:6px">The file may have expired or be unavailable</p></div>';
-      });
-  }
-}
-
-// ── Search + sort ─────────────────────────────────────────────────────────────
-if (searchInput) searchInput.addEventListener('input', renderFiles);
-if (sortSelect)  sortSelect.addEventListener('change', renderFiles);
-
-// ── Password modal (for protected file download) ──────────────────────────────
-function openPwModal(id) {
-  _pendingDlId = id;
-  if (pwModalInput) pwModalInput.value = '';
-  if (pwError)      pwError.textContent = '';
-  if (pwModal)      pwModal.classList.remove('hidden');
-  setTimeout(() => pwModalInput?.focus(), 60);
-}
-function closePwModal() {
-  if (pwModal) pwModal.classList.add('hidden');
-  _pendingDlId = null;
-}
-if (pwModalClose) pwModalClose.addEventListener('click', closePwModal);
-if (pwModal) pwModal.addEventListener('click', e => { if (e.target === pwModal) closePwModal(); });
-if (pwSubmit) {
-  pwSubmit.addEventListener('click', async () => {
-    const pw = pwModalInput?.value?.trim();
-    if (!pw) { if (pwError) pwError.textContent = 'Enter a password.'; return; }
-    if (pwError) pwError.textContent = '';
-    pwSubmit.disabled = true; pwSubmit.textContent = 'Checking…';
-    try {
-      const r = await fetch('/api/verify-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_id: _pendingDlId, password: pw }),
-      });
-      const d = await r.json();
-      if (d.success) { closePwModal(); window.open(d.download_url, '_blank', 'noopener'); }
-      else { if (pwError) pwError.textContent = d.error || 'Incorrect password.'; }
-    } catch { if (pwError) pwError.textContent = 'Network error. Try again.'; }
-    finally { pwSubmit.disabled = false; pwSubmit.textContent = 'Unlock & download'; }
-  });
-}
-if (pwModalInput) pwModalInput.addEventListener('keydown', e => { if (e.key === 'Enter') pwSubmit?.click(); });
-
-// ── Settings + help modals ────────────────────────────────────────────────────
-const helpBtn       = document.getElementById('help-btn');
-const helpModal     = document.getElementById('help-modal');
-const helpClose     = document.getElementById('help-close');
-const themeRow      = document.getElementById('theme-row');
-const accentSwatches = document.getElementById('accent-swatches');
-
-function openModal(m)  { m?.classList.remove('hidden'); }
-function closeModal(m) { m?.classList.add('hidden'); }
-
-if (settingsBtn)   settingsBtn.addEventListener('click', () => openModal(settingsModal));
-if (settingsClose) settingsClose.addEventListener('click', () => closeModal(settingsModal));
-if (settingsModal) settingsModal.addEventListener('click', e => { if (e.target === settingsModal) closeModal(settingsModal); });
-
-if (helpBtn)       helpBtn.addEventListener('click', () => openModal(helpModal));
-if (helpClose)     helpClose.addEventListener('click', () => closeModal(helpModal));
-if (helpModal)     helpModal.addEventListener('click', e => { if (e.target === helpModal) closeModal(helpModal); });
-
-// Help tabs
-document.querySelectorAll('[data-help-tab]').forEach(tab => {
-  tab.addEventListener('click', () => {
-    const name = tab.dataset.helpTab;
-    document.querySelectorAll('[data-help-tab]').forEach(t => t.classList.toggle('active', t === tab));
-    document.querySelectorAll('[data-help-pane]').forEach(p => p.classList.toggle('active', p.dataset.helpPane === name));
-  });
-});
-
-// Theme picker
-if (themeRow) {
-  themeRow.addEventListener('click', e => {
-    const btn = e.target.closest('[data-theme]');
-    if (!btn) return;
-    _theme = btn.dataset.theme;
-    localStorage.setItem('yeet_theme', _theme);
-    applyTheme();
-    syncSettingsButtons();
-  });
-}
-
-// Accent swatches
-if (accentSwatches) {
-  accentSwatches.addEventListener('click', e => {
-    const btn = e.target.closest('[data-accent]');
-    if (!btn) return;
-    _accent = btn.dataset.accent;
-    localStorage.setItem('yeet_accent', _accent);
-    applyAccent(_accent);
-    syncSettingsButtons();
-  });
-}
-
-// Esc closes any open modal; ? opens help (when not typing)
-document.addEventListener('keydown', e => {
-  const a = document.activeElement;
-  const inField = a && ['INPUT', 'TEXTAREA', 'SELECT'].includes(a.tagName);
-  if (e.key === 'Escape') {
-    [settingsModal, helpModal, pasteModal, pwModal].forEach(m => {
-      if (m && !m.classList.contains('hidden')) closeModal(m);
-    });
-  }
-  if (e.key === '?' && !inField && !e.ctrlKey && !e.metaKey) {
-    e.preventDefault();
-    openModal(helpModal);
-  }
-});
-
-// ── Deleted / virus log ───────────────────────────────────────────────────────
-if (deletedSection) {
-  deletedSection.addEventListener('toggle', () => {
-    if (deletedSection.open && deletedList && !deletedList.children.length) loadDeletedFiles();
-  });
-}
-async function loadDeletedFiles() {
-  if (!deletedList) return;
-  try {
-    const r = await fetch('/api/virus-log');
-    const data = await r.json();
-    const entries = data.deletions || [];
-    if (!entries.length) {
-      deletedList.innerHTML = '<div class="deleted-item"><span class="d-name">No recent removals by scanner.</span></div>';
-      return;
-    }
-    deletedList.innerHTML = entries.map(e => `<div class="deleted-item">
-      <span class="d-name">${esc(e.filename)}</span>
-      <span class="d-reason">virus detected</span>
-      <span class="d-time">${timeAgo(e.ts)}</span>
-    </div>`).join('');
-  } catch {
-    deletedList.innerHTML = '<div class="deleted-item"><span class="d-name">Failed to load.</span></div>';
-  }
-}
+/* yeet front end — no framework, no build step.
+   Sections: utilities · appearance · modals · uploader · upload page · file list ·
+   clipboard · share page (download landing) · folder page · clipboard page. */
+
+const CFG = window.YEET_CONFIG || {};
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
-const FILE_ICONS = {
-  pdf:'📄', zip:'📦', gz:'📦', tar:'📦', rar:'📦', '7z':'📦', bz2:'📦', xz:'📦',
-  png:'🖼', jpg:'🖼', jpeg:'🖼', gif:'🖼', webp:'🖼', bmp:'🖼', avif:'🖼',
-  mp4:'🎬', mov:'🎬', avi:'🎬', mkv:'🎬', webm:'🎬',
-  mp3:'🎵', wav:'🎵', flac:'🎵', aac:'🎵', ogg:'🎵', m4a:'🎵',
-  doc:'📝', docx:'📝', txt:'📝', md:'📝', rtf:'📝', odt:'📝',
-  xls:'📊', xlsx:'📊', csv:'📊', ods:'📊',
-  json:'⚙', xml:'⚙', yaml:'⚙', yml:'⚙', toml:'⚙',
-  py:'⚡', js:'⚡', ts:'⚡', go:'⚡', rs:'⚡', java:'⚡', cpp:'⚡', c:'⚡', css:'⚡',
-};
-function fileIcon(name) {
-  const ext = (name.split('.').pop() || '').toLowerCase();
-  return FILE_ICONS[ext] || '📄';
+function esc(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
+function icon(name, cls = '') { return `<svg class="icon ${cls}"><use href="#i-${name}"/></svg>`; }
 
 function fmtSize(b) {
-  if (b < 1024)        return b + ' B';
-  if (b < 1_048_576)   return (b / 1024).toFixed(1) + ' KB';
-  if (b < 1_073_741_824) return (b / 1_048_576).toFixed(1) + ' MB';
-  return (b / 1_073_741_824).toFixed(2) + ' GB';
+  b = Number(b) || 0;
+  const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let i = 0;
+  while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+  return (b >= 10 || i === 0 ? Math.round(b) : b.toFixed(1)) + ' ' + u[i];
 }
-
+function fmtDuration(s) {
+  if (!isFinite(s) || s < 0) return '';
+  if (s < 60) return Math.ceil(s) + 's';
+  if (s < 3600) return Math.floor(s / 60) + 'm ' + String(Math.floor(s % 60)).padStart(2, '0') + 's';
+  return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
+}
 function fmtExpiry(iso) {
   const ms = new Date(iso).getTime() - Date.now();
   if (ms <= 0) return { label: 'expired', cls: 'exp-urgent' };
   const h = ms / 3_600_000;
-  if (h >= 48) return { label: Math.floor(h / 24) + 'd',  cls: 'exp-ok' };
-  if (h >= 6)  return { label: Math.floor(h) + 'h',       cls: 'exp-ok' };
-  if (h >= 1)  return { label: Math.floor(h) + 'h',       cls: 'exp-warn' };
-  return             { label: Math.floor(ms / 60_000) + 'm', cls: 'exp-urgent' };
+  if (h >= 48) return { label: `${Math.floor(h / 24)}d left`, cls: '' };
+  if (h >= 6) return { label: `${Math.floor(h)}h left`, cls: '' };
+  if (h >= 1) return { label: `${Math.floor(h)}h left`, cls: 'exp-warn' };
+  return { label: `${Math.max(1, Math.floor(ms / 60_000))}m left`, cls: 'exp-urgent' };
 }
-
 function timeAgo(iso) {
-  const diff = Date.now() - new Date(iso).getTime();
-  const m = Math.floor(diff / 60_000);
-  if (m < 1)  return 'just now';
+  // SQLite's datetime('now') has no zone; it is UTC.
+  const t = new Date(/Z|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso.replace(' ', 'T') + 'Z').getTime();
+  const m = Math.floor((Date.now() - t) / 60_000);
+  if (m < 1) return 'just now';
   if (m < 60) return m + 'm ago';
   const h = Math.floor(m / 60);
-  if (h < 24) return h + 'h ago';
-  return Math.floor(h / 24) + 'd ago';
+  return h < 24 ? h + 'h ago' : Math.floor(h / 24) + 'd ago';
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const safeJson = t => { try { return JSON.parse(t); } catch { return {}; } };
+const store = {
+  get(k, d = null) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
+  del(k) { try { localStorage.removeItem(k); } catch { /* ignore */ } },
+};
+
+function getSession() {
+  let s = store.get('yeet_session');
+  if (!s) {
+    const b = crypto.getRandomValues(new Uint8Array(16));
+    s = Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+    store.set('yeet_session', s);
+  }
+  return s;
 }
 
-function esc(s) {
-  return String(s)
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // iOS / http / lost user-activation: fall back to a hidden textarea.
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+    document.body.appendChild(ta); ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch { /* ignore */ }
+    ta.remove();
+    return ok;
+  }
 }
+async function copyWithToast(text, label = 'Link copied') {
+  if (await copyText(text)) toast(label, 'success');
+  else toast('Copy failed — long-press the link to copy it', 'warn');
+}
+const canShare = () => typeof navigator.share === 'function' && matchMedia('(pointer: coarse)').matches;
 
-// ── Toast ─────────────────────────────────────────────────────────────────────
-const TOAST_COLORS = { success: '#00F5A0', error: '#FF3366', info: '#00D4FF', warn: '#FF6B35' };
-function toast(msg, type = 'info') {
-  if (!toastContainer) return;
-  const id = 't' + Math.random().toString(36).slice(2);
+// ── Toasts ────────────────────────────────────────────────────────────────────
+const TOAST_ICON = { success: 'check', error: 'alert', warn: 'alert', info: 'info' };
+function toast(msg, type = 'info', ms = 4500) {
+  const box = $('#toasts');
+  if (!box) return;
   const el = document.createElement('div');
-  el.className = 'toast'; el.id = id;
-  el.innerHTML = `<div class="toast-dot" style="background:${TOAST_COLORS[type]||TOAST_COLORS.info}"></div><span>${esc(msg)}</span>`;
-  toastContainer.appendChild(el);
-  el.addEventListener('click', () => dismissToast(id));
-  setTimeout(() => dismissToast(id), 4000);
-}
-function dismissToast(id) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.classList.add('out');
-  setTimeout(() => el.remove(), 200);
+  el.className = `toast ${type}`;
+  el.innerHTML = `${icon(TOAST_ICON[type] || 'info')}<span>${esc(msg)}</span>`;
+  const kill = () => { el.classList.add('out'); setTimeout(() => el.remove(), 220); };
+  el.addEventListener('click', kill);
+  box.appendChild(el);
+  setTimeout(kill, type === 'error' ? Math.max(ms, 7000) : ms);
 }
 
-// ── Init ──────────────────────────────────────────────────────────────────────
-loadFileList();
-loadClipboardItems();
-setInterval(loadFileList, 30_000);
-setInterval(loadClipboardItems, 60_000);
+// ── Appearance ────────────────────────────────────────────────────────────────
+const ACCENTS = { emerald: '#2f9e74', sky: '#3b82c4', amber: '#c98a2b', rose: '#c8566e', slate: '#64748b' };
+const LEGACY_ACCENT = { cyan: 'sky', blue: 'sky', purple: 'sky', green: 'emerald', teal: 'emerald',
+  pink: 'rose', red: 'rose', orange: 'amber', yellow: 'amber', mono: 'slate' };
+let theme = store.get('yeet_theme', 'auto');
+let accent = store.get('yeet_accent', 'emerald');
+accent = LEGACY_ACCENT[accent] || (ACCENTS[accent] ? accent : 'emerald');
+const lightMql = matchMedia('(prefers-color-scheme: light)');
+
+function applyAppearance() {
+  const eff = theme === 'auto' ? (lightMql.matches ? 'light' : 'dark') : theme;
+  document.documentElement.setAttribute('data-theme', eff);
+  document.documentElement.style.setProperty('--accent', ACCENTS[accent]);
+  $$('[data-theme-opt]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.themeOpt === theme)));
+  $$('[data-accent]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.accent === accent)));
+}
+lightMql.addEventListener?.('change', () => theme === 'auto' && applyAppearance());
+$('#theme-row')?.addEventListener('click', e => {
+  const b = e.target.closest('[data-theme-opt]');
+  if (!b) return;
+  theme = b.dataset.themeOpt; store.set('yeet_theme', theme); applyAppearance();
+});
+$('#accent-swatches')?.addEventListener('click', e => {
+  const b = e.target.closest('[data-accent]');
+  if (!b) return;
+  accent = b.dataset.accent; store.set('yeet_accent', accent); applyAppearance();
+});
+applyAppearance();
+
+const header = $('#site-header');
+if (header) {
+  const onScroll = () => header.classList.toggle('scrolled', scrollY > 4);
+  addEventListener('scroll', onScroll, { passive: true }); onScroll();
+}
+
+// ── Modals ────────────────────────────────────────────────────────────────────
+let lastFocus = null;
+function openModal(m) {
+  if (!m) return;
+  lastFocus = document.activeElement;
+  m.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  setTimeout(() => (m.querySelector('[autofocus], input, textarea, button:not([data-close])') || m).focus?.(), 50);
+}
+function closeModal(m) {
+  if (!m || m.classList.contains('hidden')) return;
+  m.classList.add('hidden');
+  if (m.dataset.temp) m.remove();
+  if (!$$('.modal').some(x => !x.classList.contains('hidden'))) document.body.style.overflow = '';
+  lastFocus?.focus?.();
+}
+document.addEventListener('click', e => {
+  const close = e.target.closest('[data-close]');
+  if (close) { closeModal(close.closest('.modal')); return; }
+  if (e.target.classList?.contains('modal')) closeModal(e.target);
+});
+document.addEventListener('keydown', e => {
+  const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
+  if (e.key === 'Escape') $$('.modal').filter(m => !m.classList.contains('hidden')).forEach(closeModal);
+  if (e.key === '?' && !typing && !e.metaKey && !e.ctrlKey) { e.preventDefault(); openModal($('#help-modal')); }
+});
+$('#settings-btn')?.addEventListener('click', () => openModal($('#settings-modal')));
+$('#help-btn')?.addEventListener('click', () => openModal($('#help-modal')));
+$$('[data-tab]').forEach(tab => tab.addEventListener('click', () => {
+  $$('[data-tab]').forEach(t => t.setAttribute('aria-selected', String(t === tab)));
+  $$('[data-pane]').forEach(p => p.classList.toggle('active', p.dataset.pane === tab.dataset.tab));
+}));
+
+function tempModal(title, bodyHtml, cls = '') {
+  const m = document.createElement('div');
+  m.className = 'modal'; m.dataset.temp = '1';
+  m.setAttribute('role', 'dialog'); m.setAttribute('aria-modal', 'true');
+  m.innerHTML = `<div class="modal-box ${cls}"><div class="modal-head">
+      <span class="modal-title">${esc(title)}</span>${'<span data-slot="head"></span>'}
+      <button class="icon-btn" data-close type="button" aria-label="Close">${icon('x')}</button>
+    </div>${bodyHtml}</div>`;
+  document.body.appendChild(m);
+  openModal(m);
+  return m;
+}
+
+// Format any [data-expires] timestamps in the viewer's local time.
+$$('[data-expires]').forEach(el => {
+  const d = new Date(el.dataset.expires);
+  if (!isNaN(d)) el.textContent = d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+});
+
+// ── HTTP helpers ──────────────────────────────────────────────────────────────
+class HttpError extends Error {
+  constructor(status, body) {
+    super(body?.error || httpMessage(status));
+    this.status = status; this.body = body;
+  }
+}
+function httpMessage(status) {
+  if (status === 0) return 'Network error — check your connection.';
+  if (status === 413) return 'Too large for the server or a proxy in front of it.';
+  if (status === 429) return 'Rate limited — wait a bit and try again.';
+  if (status === 502 || status === 504 || status === 524) return 'The server took too long to answer.';
+  if (status === 507) return 'The server is out of space.';
+  return `Server error (${status}).`;
+}
+async function api(method, url, body) {
+  let r;
+  try {
+    r = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json', 'X-Session-ID': getSession() },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch {
+    throw new HttpError(0, {});
+  }
+  const data = safeJson(await r.text());
+  if (!r.ok && r.status !== 202) throw new HttpError(r.status, data);
+  return { status: r.status, data };
+}
+
+// ── Uploader (chunked, resumable) ─────────────────────────────────────────────
+// Each file is split into server-chosen chunks (16 MB by default) and sent with
+// PUT, up to PARALLEL at a time. Every chunk retries with backoff, waits out
+// offline periods, and an interrupted upload can resume after a reload because
+// the upload id is remembered per file fingerprint.
+const PARALLEL_CHUNKS = 3;
+const PARALLEL_FILES = 2;
+const MAX_TRIES = 8;
+const RESUME_KEY = 'yeet_resume';
+
+function resumeMap() { return safeJson(store.get(RESUME_KEY, '{}')) || {}; }
+function rememberUpload(fp, id) {
+  const m = resumeMap();
+  m[fp] = { id, t: Date.now() };
+  for (const [k, v] of Object.entries(m)) if (Date.now() - v.t > 6 * 3600_000) delete m[k];
+  store.set(RESUME_KEY, JSON.stringify(m));
+}
+function forgetUpload(fp) { const m = resumeMap(); delete m[fp]; store.set(RESUME_KEY, JSON.stringify(m)); }
+const fingerprint = (f, extra = '') => [f.name, f.size, f.lastModified, extra].join('|');
+
+function waitOnline() {
+  if (navigator.onLine !== false) return Promise.resolve();
+  return new Promise(res => addEventListener('online', res, { once: true }));
+}
+
+function putChunk(url, blob, onProgress, signal) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', url);
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    xhr.upload.onprogress = e => onProgress(e.loaded);
+    xhr.onload = () => xhr.status >= 200 && xhr.status < 300
+      ? resolve() : reject(new HttpError(xhr.status, safeJson(xhr.responseText)));
+    xhr.onerror = () => reject(new HttpError(0, {}));
+    xhr.ontimeout = () => reject(new HttpError(0, {}));
+    xhr.timeout = 10 * 60_000;
+    if (signal) {
+      if (signal.aborted) { reject(new DOMException('aborted', 'AbortError')); return; }
+      signal.addEventListener('abort', () => { xhr.abort(); reject(new DOMException('aborted', 'AbortError')); });
+    }
+    xhr.send(blob);
+  });
+}
+
+// Transient: network drop, proxy timeout, 5xx (but not 507 "disk full").
+const TRANSIENT = s => s === 0 || s === 408 || (s >= 500 && s !== 507);
+// A chunk PUT may also see 400 (body cut off mid-flight) or 429 — just resend.
+const CHUNK_RETRY = s => TRANSIENT(s) || s === 400 || s === 429;
+
+async function withRetry(fn, signal, onWait, retryable = TRANSIENT) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (e.name === 'AbortError' || signal?.aborted) throw e;
+      if (!(e instanceof HttpError) || !retryable(e.status) || attempt >= MAX_TRIES) throw e;
+      onWait?.(attempt, e);
+      await waitOnline();
+      await sleep(Math.min(30_000, 1000 * 2 ** (attempt - 1)) * (0.75 + Math.random() / 2));
+    }
+  }
+}
+
+/** Upload one File. `opts` is the init payload; `hooks.progress(bytesDone)`. Returns server result. */
+async function uploadOne(file, opts, hooks, signal) {
+  const fp = fingerprint(file, opts.bundle_id || '');
+  let up = null;
+  let received = new Set();
+
+  const saved = resumeMap()[fp];
+  if (saved && !opts.bundle_id) {
+    try {
+      const { data } = await api('GET', `/api/uploads/${saved.id}`);
+      if (data.status === 'uploading' && data.size === file.size) {
+        up = data; received = new Set(data.received || []);
+        hooks.note?.('Resuming earlier upload…');
+      } else if (data.status === 'done' && data.result) {
+        forgetUpload(fp); return data.result;
+      }
+    } catch { forgetUpload(fp); }
+  }
+  if (!up) {
+    const { data } = await withRetry(() => api('POST', '/api/uploads', { name: file.name, size: file.size, ...opts }), signal);
+    up = data;
+    if (!opts.bundle_id && file.size > up.chunk_size) rememberUpload(fp, up.id);
+  }
+
+  const cs = up.chunk_size;
+  const inflight = new Map();
+  let doneBytes = 0;
+  for (const i of received) doneBytes += Math.min(cs, file.size - i * cs);
+  const report = () => hooks.progress(doneBytes + [...inflight.values()].reduce((a, b) => a + b, 0));
+  report();
+
+  const sendChunks = async indexes => {
+    const queue = [...indexes];
+    const worker = async () => {
+      while (queue.length) {
+        const i = queue.shift();
+        const blob = file.slice(i * cs, Math.min(file.size, (i + 1) * cs));
+        await withRetry(() => putChunk(`/api/uploads/${up.id}/chunks/${i}`, blob,
+          loaded => { inflight.set(i, loaded); report(); }, signal),
+          signal, (n, e) => { inflight.set(i, 0); hooks.note?.(`Connection hiccup — retrying (${n})…`, e); },
+          CHUNK_RETRY);
+        inflight.delete(i); doneBytes += blob.size; received.add(i); report();
+        hooks.note?.('');
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(PARALLEL_CHUNKS, queue.length) }, worker));
+  };
+
+  const all = Array.from({ length: up.chunk_count }, (_, i) => i);
+  await sendChunks(all.filter(i => !received.has(i)));
+
+  hooks.processing?.();
+  for (let round = 0; round < 3; round++) {
+    let res;
+    try {
+      res = await withRetry(() => api('POST', `/api/uploads/${up.id}/complete`), signal);
+    } catch (e) {
+      if (e.status === 409 && e.body?.missing) { await sendChunks(e.body.missing); continue; }
+      if (e.status && e.status !== 404) forgetUpload(fp);
+      throw e;
+    }
+    if (res.status === 202) {
+      // Virus scan still running — poll. Survives proxies timing out long requests.
+      for (;;) {
+        await sleep(1500);
+        const { data } = await withRetry(() => api('GET', `/api/uploads/${up.id}`), signal);
+        if (data.status === 'done' || data.status === 'failed') {
+          forgetUpload(fp);
+          if (data.code !== 201) throw new HttpError(data.code, data.result);
+          return data.result;
+        }
+        if (data.status === 'uploading') break; // server restarted; complete again
+      }
+      continue;
+    }
+    forgetUpload(fp);
+    return res.data;
+  }
+  throw new HttpError(409, { error: 'Upload could not be completed. Please try again.' });
+}
+
+// ── Upload page ───────────────────────────────────────────────────────────────
+const dropZone = $('#drop-zone');
+
+function initUploadPage() {
+  const fileInput = $('#file-input');
+  const photoInput = $('#photo-input');
+  const folderInput = $('#folder-input');
+  const pwInput = $('#dz-password');
+  const burnInput = $('#dz-burn');
+  const queueWrap = $('#queue-wrap');
+  const queueEl = $('#queue');
+
+  // Expiry
+  let expiry = parseInt(store.get('yeet_expiry', String(CFG.expiryHours || 24)), 10);
+  const chips = $$('#expiry-chips [data-hours]');
+  if (!chips.some(c => +c.dataset.hours === expiry)) expiry = +(chips.find(c => +c.dataset.hours === (CFG.expiryHours || 24)) || chips[1]).dataset.hours;
+  const syncChips = () => chips.forEach(c => c.setAttribute('aria-pressed', String(+c.dataset.hours === expiry)));
+  chips.forEach(c => c.addEventListener('click', () => { expiry = +c.dataset.hours; store.set('yeet_expiry', String(expiry)); syncChips(); }));
+  syncChips();
+
+  // Password helpers
+  $('#dz-show-pw')?.addEventListener('click', () => { pwInput.type = pwInput.type === 'password' ? 'text' : 'password'; });
+  $('#dz-gen-pw')?.addEventListener('click', async () => {
+    const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789';
+    pwInput.value = Array.from(crypto.getRandomValues(new Uint8Array(12)), b => chars[b % chars.length]).join('');
+    pwInput.type = 'text';
+    if (await copyText(pwInput.value)) toast('Password generated and copied — send it separately from the link', 'success');
+  });
+
+  const options = () => ({
+    password: pwInput?.value || '',
+    expiry_hours: expiry,
+    burn: burnInput?.checked ? 1 : 0,
+    session_id: getSession(),
+  });
+
+  // Pickers
+  const pick = input => input?.click();
+  dropZone.addEventListener('click', e => { if (!e.target.closest('.dz-action')) pick(fileInput); });
+  dropZone.addEventListener('keydown', e => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target === dropZone) { e.preventDefault(); pick(fileInput); }
+  });
+  $('#quick-files')?.addEventListener('click', () => pick(fileInput));
+  $('#quick-photo')?.addEventListener('click', () => pick(photoInput));
+  $('#quick-folder')?.addEventListener('click', () => pick(folderInput));
+  $('#quick-paste')?.addEventListener('click', openPasteModal);
+
+  for (const input of [fileInput, photoInput]) {
+    input?.addEventListener('change', () => {
+      const files = Array.from(input.files || []);
+      input.value = '';
+      enqueueFiles(files);
+    });
+  }
+  folderInput?.addEventListener('change', () => {
+    const files = Array.from(folderInput.files || []);
+    folderInput.value = '';
+    if (!files.length) return;
+    const items = files.map(f => ({ file: f, path: f.webkitRelativePath || f.name }));
+    enqueueFolder(items, items[0].path.split('/')[0] || 'Folder');
+  });
+
+  // Drag & drop (whole page accepts drops so near-misses don't open the file in the tab)
+  let dragDepth = 0;
+  addEventListener('dragenter', e => { if (hasFiles(e)) { dragDepth++; dropZone.classList.add('drag-over'); } });
+  addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; dropZone.classList.remove('drag-over'); } });
+  addEventListener('dragover', e => { if (hasFiles(e)) e.preventDefault(); });
+  addEventListener('drop', async e => {
+    if (!hasFiles(e)) return;
+    e.preventDefault(); dragDepth = 0; dropZone.classList.remove('drag-over');
+    const loose = [];
+    const folders = [];
+    for (const item of Array.from(e.dataTransfer.items || [])) {
+      if (item.kind !== 'file') continue;
+      const entry = item.webkitGetAsEntry?.();
+      if (entry?.isDirectory) folders.push(entry);
+      else { const f = item.getAsFile(); if (f) loose.push(f); }
+    }
+    if (!e.dataTransfer.items) loose.push(...Array.from(e.dataTransfer.files));
+    for (const entry of folders) {
+      const items = await walkDirectory(entry);
+      if (items.length) enqueueFolder(items, entry.name);
+      else toast(`"${entry.name}" is empty`, 'warn');
+    }
+    enqueueFiles(loose);
+  });
+  function hasFiles(e) { return Array.from(e.dataTransfer?.types || []).includes('Files'); }
+
+  // Paste anywhere
+  document.addEventListener('paste', async e => {
+    const a = document.activeElement;
+    if (a && ['INPUT', 'TEXTAREA'].includes(a.tagName)) return;
+    const items = Array.from(e.clipboardData?.items || []);
+    const files = items.filter(i => i.kind === 'file').map(i => i.getAsFile()).filter(Boolean);
+    if (files.length) {
+      e.preventDefault();
+      const img = files.length === 1 && files[0].type.startsWith('image/') ? files[0] : null;
+      if (img && !e.shiftKey && CLIP_IMAGE_TYPES.includes(img.type) && img.size <= CLIP_IMAGE_MAX) {
+        await saveClipboardImage(img);
+      } else {
+        enqueueFiles(files.map((f, i) => f.name && f.name !== 'image.png' ? f
+          : new File([f], `pasted-${new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')}${i ? '-' + i : ''}.${(f.type.split('/')[1] || 'bin').replace('jpeg', 'jpg')}`, { type: f.type })));
+      }
+      return;
+    }
+    const txt = items.find(i => i.kind === 'string' && i.type === 'text/plain');
+    if (txt) {
+      e.preventDefault();
+      const text = await new Promise(r => txt.getAsString(r));
+      if (text.trim()) await saveClipboardText(text);
+    }
+  });
+
+  // ── Queue ──────────────────────────────────────────────────────────────────
+  const jobs = [];
+  let running = 0;
+  let wakeLock = null;
+
+  function enqueueFiles(files) {
+    if (!files.length) return;
+    if (CFG.storageBlocked) { toast('Uploads are paused — the server is out of space.', 'error'); return; }
+    const opts = options();
+    for (const f of files) {
+      if (CFG.maxFileBytes && f.size > CFG.maxFileBytes) {
+        addJob({ name: f.name, size: f.size, kind: 'file' }).fail(`Too large — the limit is ${fmtSize(CFG.maxFileBytes)} per file.`);
+        continue;
+      }
+      const job = addJob({ name: f.name, size: f.size, kind: 'file', file: f, opts });
+      jobs.push(job);
+    }
+    pump();
+  }
+
+  function enqueueFolder(items, name) {
+    if (CFG.storageBlocked) { toast('Uploads are paused — the server is out of space.', 'error'); return; }
+    const total = items.reduce((s, it) => s + it.file.size, 0);
+    const tooBig = items.filter(it => CFG.maxFileBytes && it.file.size > CFG.maxFileBytes);
+    if (tooBig.length) toast(`${tooBig.length} file(s) over ${fmtSize(CFG.maxFileBytes)} will be skipped`, 'warn');
+    const opts = options();
+    if (opts.burn) toast('Single download does not apply to folders — uploading normally', 'info');
+    const job = addJob({ name, size: total, kind: 'folder', items: items.filter(it => !tooBig.includes(it)), opts });
+    jobs.push(job);
+    pump();
+  }
+
+  function pump() {
+    while (running < PARALLEL_FILES) {
+      const next = jobs.find(j => j.state === 'queued');
+      if (!next) break;
+      running++;
+      next.state = 'running';
+      lockScreen();
+      next.run().finally(() => { running--; pump(); if (!running) releaseScreen(); });
+    }
+  }
+
+  async function lockScreen() {
+    try { if (!wakeLock && navigator.wakeLock) wakeLock = await navigator.wakeLock.request('screen'); } catch { /* not allowed */ }
+  }
+  function releaseScreen() { wakeLock?.release?.().catch(() => {}); wakeLock = null; }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && running) lockScreen(); });
+  addEventListener('beforeunload', e => { if (running) { e.preventDefault(); e.returnValue = ''; } });
+
+  function addJob(spec) {
+    queueWrap.classList.remove('hidden');
+    // On phones the queue sits below the fold — bring it into view so the
+    // upload visibly starts.
+    requestAnimationFrame(() => {
+      const r = queueWrap.getBoundingClientRect();
+      if (r.top > innerHeight - 80 || r.bottom < 0) queueWrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    const el = document.createElement('div');
+    el.className = 'job';
+    el.innerHTML = `<span class="job-icon">${icon(spec.kind === 'folder' ? 'folder' : kindIcon(spec.name))}</span>
+      <div class="job-main">
+        <div class="job-top"><span class="job-name">${esc(spec.name)}</span><span class="job-stat">${fmtSize(spec.size)}</span></div>
+        <div class="bar"><i></i></div>
+        <div class="job-msg">Waiting…</div>
+      </div>
+      <div class="job-actions"><button class="icon-btn" type="button" data-cancel aria-label="Cancel">${icon('x')}</button></div>`;
+    queueEl.prepend(el);
+    const fill = $('.bar > i', el), stat = $('.job-stat', el), msg = $('.job-msg', el), actions = $('.job-actions', el);
+    const ctrl = new AbortController();
+    let lastT = performance.now(), lastB = 0, speed = 0;
+
+    const job = {
+      ...spec, el, state: 'queued', result: null,
+      progress(bytes) {
+        const pct = spec.size ? Math.min(100, bytes / spec.size * 100) : 100;
+        fill.style.width = pct.toFixed(1) + '%';
+        const now = performance.now();
+        if (now - lastT > 700) {
+          const inst = (bytes - lastB) / ((now - lastT) / 1000);
+          speed = speed ? speed * 0.7 + inst * 0.3 : inst;
+          lastT = now; lastB = bytes;
+        }
+        const eta = speed > 0 ? (spec.size - bytes) / speed : NaN;
+        stat.textContent = `${Math.floor(pct)}%` + (speed > 1024 ? ` · ${fmtSize(speed)}/s` : '') + (eta > 1 ? ` · ${fmtDuration(eta)}` : '');
+        if (!msg.dataset.sticky) msg.textContent = `${fmtSize(bytes)} of ${fmtSize(spec.size)}`;
+      },
+      note(text) {
+        if (text) { msg.textContent = text; msg.dataset.sticky = '1'; } else delete msg.dataset.sticky;
+      },
+      processing() {
+        el.classList.add('processing');
+        stat.textContent = fmtSize(spec.size);
+        msg.textContent = 'Scanning for viruses — the first upload in a while can take about a minute…';
+        msg.dataset.sticky = '1';
+      },
+      fail(text) {
+        job.state = 'failed';
+        el.classList.remove('processing'); el.classList.add('failed');
+        msg.textContent = text; delete msg.dataset.sticky;
+        stat.textContent = fmtSize(spec.size);
+        actions.innerHTML = (spec.file || spec.items)
+          ? `<button class="icon-btn" type="button" data-retry aria-label="Retry">${icon('refresh')}</button>
+             <button class="icon-btn" type="button" data-dismiss aria-label="Dismiss">${icon('x')}</button>`
+          : `<button class="icon-btn" type="button" data-dismiss aria-label="Dismiss">${icon('x')}</button>`;
+        updateQueueTools();
+        return job;
+      },
+      succeed(res, label) {
+        job.state = 'done'; job.result = res;
+        el.classList.remove('processing'); el.classList.add('done');
+        fill.style.width = '100%';
+        stat.textContent = fmtSize(res.size ?? res.total_size ?? spec.size);
+        delete msg.dataset.sticky;
+        msg.innerHTML = `<a class="job-link" href="${esc(res.url)}" target="_blank" rel="noopener">${icon('check')}<span>${esc(res.url.replace(/^https?:\/\//, ''))}</span></a>`;
+        actions.innerHTML = `
+          ${canShare() ? `<button class="icon-btn" type="button" data-share aria-label="Share">${icon('share')}</button>` : ''}
+          <button class="icon-btn" type="button" data-copy aria-label="Copy link">${icon('copy')}</button>`;
+        if (label) toast(label, 'success');
+        if (res.warning) toast(res.warning, 'warn', 8000);
+        if (res.advisory) toast(res.advisory, 'info', 8000);
+        updateQueueTools();
+        loadFiles();
+      },
+      async run() {
+        el.classList.remove('failed', 'done');
+        try {
+          if (spec.kind === 'folder') await runFolder(job, ctrl.signal);
+          else {
+            const res = await uploadOne(spec.file, spec.opts, job, ctrl.signal);
+            const copied = await copyText(res.url);
+            job.succeed(res, copied ? 'Uploaded — link copied' : 'Uploaded');
+          }
+        } catch (e) {
+          if (e.name === 'AbortError') return;
+          job.fail(e.message || 'Upload failed');
+          if (e.status === 507 || e.status === 429) toast(e.message, 'error');
+        }
+      },
+    };
+
+    el.addEventListener('click', async e => {
+      if (e.target.closest('[data-cancel]')) {
+        ctrl.abort(); job.state = 'cancelled'; el.remove(); updateQueueTools();
+      } else if (e.target.closest('[data-dismiss]')) {
+        el.remove(); job.state = 'cancelled'; updateQueueTools();
+      } else if (e.target.closest('[data-retry]')) {
+        actions.innerHTML = `<button class="icon-btn" type="button" data-cancel aria-label="Cancel">${icon('x')}</button>`;
+        msg.textContent = 'Retrying…'; job.state = 'queued'; pump();
+      } else if (e.target.closest('[data-copy]')) {
+        copyWithToast(job.result.url);
+      } else if (e.target.closest('[data-share]')) {
+        navigator.share({ title: spec.name, url: job.result.url }).catch(() => {});
+      }
+    });
+    return job;
+  }
+
+  async function runFolder(job, signal) {
+    const { items, opts } = job;
+    if (!items.length) throw new Error('Nothing to upload.');
+    const { data: bundle } = await withRetry(() => api('POST', '/api/bundles', {
+      name: job.name, file_count: items.length,
+      total_size: items.reduce((s, it) => s + it.file.size, 0),
+      password: opts.password, expiry_hours: opts.expiry_hours, session_id: opts.session_id,
+    }), signal);
+
+    let base = 0;
+    const skipped = [];
+    for (const [n, it] of items.entries()) {
+      job.note(`File ${n + 1} of ${items.length}: ${it.path}`);
+      try {
+        await uploadOne(it.file, { bundle_id: bundle.id, bundle_token: bundle.token, path: it.path },
+          { progress: b => job.progress(base + b) }, signal);
+      } catch (e) {
+        if (e.name === 'AbortError') throw e;
+        if (e.status === 507 || e.status === 429 || e.status === 0) throw e;
+        skipped.push(`${it.path}: ${e.message}`);
+      }
+      base += it.file.size;
+    }
+    job.processing();
+    const { data } = await withRetry(() => api('POST', `/api/bundles/${bundle.id}/complete`, { bundle_token: bundle.token }), signal);
+    const copied = await copyText(data.url);
+    job.succeed(data, `Folder uploaded (${data.file_count} files)` + (copied ? ' — link copied' : ''));
+    if (skipped.length) toast(`${skipped.length} file(s) skipped — ${skipped[0]}`, 'warn', 10000);
+  }
+
+  function updateQueueTools() {
+    const done = $$('.job.done', queueEl).length;
+    $('#copy-all').hidden = done < 2;
+    if (!queueEl.children.length) queueWrap.classList.add('hidden');
+  }
+  $('#clear-done')?.addEventListener('click', () => {
+    $$('.job.done, .job.failed', queueEl).forEach(el => el.remove());
+    updateQueueTools();
+  });
+  $('#copy-all')?.addEventListener('click', () => {
+    const urls = jobs.filter(j => j.state === 'done' && j.el.isConnected).map(j => j.result.url);
+    copyWithToast(urls.join('\n'), `${urls.length} links copied`);
+  });
+
+  initFileList();
+  initClipboard();
+  initScannerLog();
+}
+
+async function walkDirectory(root) {
+  const out = [];
+  const readAll = reader => new Promise(res => {
+    const all = [];
+    const step = () => reader.readEntries(batch => { if (!batch.length) res(all); else { all.push(...batch); step(); } }, () => res(all));
+    step();
+  });
+  async function walk(entry, path) {
+    if (entry.isFile) {
+      const f = await new Promise(res => entry.file(res, () => res(null)));
+      if (f) out.push({ file: f, path });
+    } else if (entry.isDirectory) {
+      for (const child of await readAll(entry.createReader())) await walk(child, `${path}/${child.name}`);
+    }
+  }
+  await walk(root, root.name);
+  return out;
+}
+
+// ── File list ─────────────────────────────────────────────────────────────────
+let allFiles = [];
+let allBundles = [];
+let scope = store.get('yeet_scope', 'mine');
+let loadFiles = () => {};
+
+function kindOf(name, mime = '') {
+  const n = (name || '').toLowerCase();
+  if (mime.startsWith('image/') || /\.(jpe?g|png|gif|webp|avif|heic|heif|bmp|tiff?)$/.test(n)) return 'image';
+  if (mime.startsWith('video/') || /\.(mp4|mov|m4v|mkv|webm|avi)$/.test(n)) return 'video';
+  if (mime.startsWith('audio/') || /\.(mp3|m4a|wav|flac|ogg|opus|aac)$/.test(n)) return 'audio';
+  if (/\.(zip|7z|rar|tar|gz|tgz|xz|zst|bz2)$/.test(n)) return 'archive';
+  if (/\.(py|js|ts|go|rs|java|c|cpp|h|rb|php|swift|kt|sh|css|html|json|ya?ml|toml|sql)$/.test(n)) return 'code';
+  if (mime === 'application/pdf' || mime.startsWith('text/') || /\.(pdf|docx?|odt|rtf|txt|md|pages|xlsx?|csv|pptx?|key|epub)$/.test(n)) return 'doc';
+  return 'file';
+}
+const kindIcon = (name, mime) => ({ image: 'image', video: 'video', audio: 'audio', archive: 'archive', code: 'code', doc: 'doc' }[kindOf(name, mime)] || 'file');
+const INLINE_IMG = /\.(jpe?g|png|gif|webp|avif|bmp)$/i;
+
+function initFileList() {
+  const list = $('#file-list');
+  const search = $('#search-input');
+  const sort = $('#sort-select');
+  const scopeBtns = $$('#scope [data-scope]');
+  const syncScope = () => scopeBtns.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.scope === scope)));
+  scopeBtns.forEach(b => b.addEventListener('click', () => { scope = b.dataset.scope; store.set('yeet_scope', scope); syncScope(); render(); }));
+  syncScope();
+  search?.addEventListener('input', render);
+  sort?.addEventListener('change', render);
+
+  let loaded = false;
+  loadFiles = async () => {
+    try {
+      const r = await fetch('/api/files/all', { headers: { 'X-Session-ID': getSession() } });
+      if (!r.ok) throw new Error();
+      const data = await r.json();
+      allFiles = data.files || []; allBundles = data.bundles || [];
+      loaded = true;
+      render();
+    } catch {
+      if (!loaded) list.innerHTML = `<div class="empty">${icon('alert', 'icon-xl')}<strong>Couldn't load files</strong><p>Check your connection — the list refreshes automatically.</p></div>`;
+    }
+  };
+
+  function render() {
+    const q = (search?.value || '').trim().toLowerCase();
+    const items = [
+      ...allBundles.map(b => ({ ...b, kind: 'folder', label: b.name, size: b.total_size })),
+      ...allFiles.map(f => ({ ...f, kind: 'file', label: f.orig_name, size: f.file_size })),
+    ].filter(it => (scope === 'all' || it.is_yours) && (!q || it.label.toLowerCase().includes(q)));
+    const by = sort?.value || 'recent';
+    items.sort((a, b) => by === 'expiry' ? new Date(a.expires_at) - new Date(b.expires_at)
+      : by === 'size' ? b.size - a.size
+      : by === 'name' ? a.label.localeCompare(b.label)
+      : String(b.created_at).localeCompare(String(a.created_at)));
+
+    $('#file-count').textContent = items.length;
+    if (!items.length) {
+      const othersExist = scope === 'mine' && (allFiles.length + allBundles.length) > 0;
+      list.innerHTML = `<div class="empty">${icon(q ? 'search' : 'upload', 'icon-xl')}
+        <strong>${q ? `Nothing matches "${esc(q)}"` : scope === 'mine' ? 'You haven’t shared anything yet' : 'No files right now'}</strong>
+        <p>${q ? 'Try a different name.' : 'Files you upload from this browser show up here until they expire.'}</p>
+        ${othersExist && !q ? '<button class="btn" type="button" data-scope-all>Show everyone’s files</button>' : ''}</div>`;
+      $('[data-scope-all]', list)?.addEventListener('click', () => { scope = 'all'; store.set('yeet_scope', scope); syncScope(); render(); });
+      return;
+    }
+    list.innerHTML = `<div class="rows">${items.map((it, i) => row(it, i)).join('')}</div>`;
+  }
+
+  function row(it, i) {
+    const exp = fmtExpiry(it.expires_at);
+    const yours = it.is_yours ? `<span class="tag you">you</span>` : '';
+    if (it.kind === 'folder') {
+      return `<div class="row" style="--i:${Math.min(i, 12)}" data-bundle="${esc(it.id)}">
+        <a class="thumb t-folder" href="/b/${esc(it.id)}" target="_blank" rel="noopener" aria-label="Open folder">${icon('folder', 'icon-lg')}</a>
+        <div class="row-main">
+          <a class="row-name" href="/b/${esc(it.id)}" target="_blank" rel="noopener">${esc(it.name)}</a>
+          <div class="row-meta">${yours}<span>${it.file_count} files</span><span class="mono">${fmtSize(it.size)}</span><span class="${exp.cls}">${exp.label}</span>
+            ${it.has_password ? `<span class="tag">${icon('lock')}password</span>` : ''}</div>
+        </div>
+        <div class="row-actions">
+          <button class="icon-btn" type="button" data-act="copy" data-url="/b/${esc(it.id)}" aria-label="Copy link">${icon('link')}</button>
+          ${it.has_password ? '' : `<a class="icon-btn hide-sm" href="/b/${esc(it.id)}/zip" download aria-label="Download zip">${icon('download')}</a>`}
+          ${it.is_yours ? `<button class="icon-btn danger" type="button" data-act="del-bundle" data-id="${esc(it.id)}" aria-label="Delete">${icon('trash')}</button>` : ''}
+        </div></div>`;
+    }
+    const k = kindOf(it.orig_name, it.mime_type);
+    const showImg = k === 'image' && INLINE_IMG.test(it.orig_name) && !it.has_password && !it.burn_after_read;
+    const thumb = showImg
+      ? `<img src="/raw/${esc(it.id)}" alt="" loading="lazy" decoding="async">`
+      : icon(kindIcon(it.orig_name, it.mime_type), 'icon-lg');
+    const previewable = !it.burn_after_read && !it.dangerous && ['image', 'video', 'audio', 'code', 'doc'].includes(k);
+    const left = it.max_downloads ? `<span>${Math.max(0, it.max_downloads - it.download_count)} download${it.max_downloads - it.download_count === 1 ? '' : 's'} left</span>` : '';
+    return `<div class="row" style="--i:${Math.min(i, 12)}" data-file="${esc(it.id)}">
+      <button class="thumb t-${k}" type="button" data-act="${previewable ? 'preview' : 'open'}" data-id="${esc(it.id)}" aria-label="Preview">${thumb}</button>
+      <div class="row-main">
+        <a class="row-name" href="/f/${esc(it.id)}" target="_blank" rel="noopener" title="${esc(it.orig_name)}">${esc(it.orig_name)}</a>
+        <div class="row-meta">${yours}<span class="mono">${fmtSize(it.size)}</span><span class="${exp.cls}">${exp.label}</span>${left}
+          ${it.has_password ? `<span class="tag">${icon('lock')}password</span>` : ''}
+          ${it.burn_after_read ? `<span class="tag burn">${icon('flame')}single download</span>` : ''}
+          ${it.dangerous ? `<span class="tag danger">${icon('alert')}executable</span>` : ''}</div>
+      </div>
+      <div class="row-actions">
+        ${previewable ? `<button class="icon-btn hide-sm" type="button" data-act="preview" data-id="${esc(it.id)}" aria-label="Preview">${icon('eye')}</button>` : ''}
+        <button class="icon-btn" type="button" data-act="copy" data-url="/f/${esc(it.id)}" aria-label="Copy link">${icon('link')}</button>
+        ${it.burn_after_read ? '' : `<button class="icon-btn hide-sm" type="button" data-act="download" data-id="${esc(it.id)}" aria-label="Download">${icon('download')}</button>`}
+        ${it.is_yours ? `<button class="icon-btn danger" type="button" data-act="del" data-id="${esc(it.id)}" aria-label="Delete">${icon('trash')}</button>` : ''}
+      </div></div>`;
+  }
+
+  // Broken thumbnails (expired, unsupported format) fall back to the type icon.
+  list.addEventListener('error', e => {
+    if (e.target.tagName === 'IMG') e.target.outerHTML = icon('image', 'icon-lg');
+  }, true);
+
+  list.addEventListener('click', async e => {
+    const b = e.target.closest('[data-act]');
+    if (!b) return;
+    const f = allFiles.find(x => x.id === b.dataset.id);
+    switch (b.dataset.act) {
+      case 'copy': copyWithToast(location.origin + b.dataset.url); break;
+      case 'open': open(`/f/${b.dataset.id}`, '_blank', 'noopener'); break;
+      case 'preview': if (f) withUnlock(f, token => showPreview(f, token)); break;
+      case 'download': if (f) withUnlock(f, token => { location.href = `/f/${f.id}?dl=1${token ? '&token=' + encodeURIComponent(token) : ''}`; }); break;
+      case 'del': await removeItem(`/api/files/${b.dataset.id}`, b.closest('.row'), 'File deleted'); break;
+      case 'del-bundle': await removeItem(`/api/bundles/${b.dataset.id}`, b.closest('.row'), 'Folder deleted'); break;
+    }
+  });
+
+  async function removeItem(url, rowEl, msg) {
+    if (!confirm('Delete this for everyone? The link stops working immediately.')) return;
+    try {
+      await api('DELETE', url);
+      rowEl.style.transition = 'opacity .2s, transform .2s'; rowEl.style.opacity = '0'; rowEl.style.transform = 'translateX(8px)';
+      setTimeout(loadFiles, 200);
+      toast(msg, 'success');
+    } catch (e) { toast(e.message || 'Delete failed', 'error'); }
+  }
+
+  loadFiles();
+  setInterval(() => document.visibilityState === 'visible' && loadFiles(), 30_000);
+}
+
+// Password-protected files: ask once, keep the token for this page view.
+const tokens = {};
+function withUnlock(f, then) {
+  if (!f.has_password) return then('');
+  if (tokens[f.id]) return then(tokens[f.id]);
+  const m = $('#pw-modal');
+  const input = $('#pw-modal-input'), err = $('#pw-error'), form = $('#pw-form'), btn = $('#pw-submit');
+  input.value = ''; err.textContent = '';
+  form.onsubmit = async ev => {
+    ev.preventDefault();
+    if (!input.value) { err.textContent = 'Enter the password.'; return; }
+    btn.disabled = true;
+    try {
+      const r = await fetch('/api/verify-password', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_id: f.id, password: input.value }) });
+      const d = await r.json();
+      if (!d.success) { err.textContent = d.error || 'Incorrect password.'; input.select(); return; }
+      tokens[f.id] = d.token; closeModal(m); then(d.token);
+    } catch { err.textContent = 'Network error — try again.'; } finally { btn.disabled = false; }
+  };
+  openModal(m);
+}
+
+function showPreview(f, token = '') {
+  const k = kindOf(f.orig_name, f.mime_type);
+  const src = `/raw/${f.id}${token ? '?token=' + encodeURIComponent(token) : ''}`;
+  if ((f.mime_type || '') === 'application/pdf') { open(src, '_blank', 'noopener'); return; }
+  let stage;
+  if (k === 'image') stage = `<img src="${src}" alt="${esc(f.orig_name)}">`;
+  else if (k === 'video') stage = `<video src="${src}" controls playsinline autoplay preload="metadata"></video>`;
+  else if (k === 'audio') stage = `<audio src="${src}" controls autoplay></audio>`;
+  else stage = `<pre data-text>Loading…</pre>`;
+  const m = tempModal(f.orig_name, `<div class="preview-stage">${stage}</div>`, 'media');
+  $('[data-slot="head"]', m).outerHTML = `<a class="btn btn-quiet" href="/f/${f.id}?dl=1${token ? '&token=' + encodeURIComponent(token) : ''}" download>${icon('download')}<span class="only-pointer">Download</span></a>`;
+  const pre = $('[data-text]', m);
+  if (pre) {
+    fetch(src).then(r => r.ok ? r.text() : Promise.reject(r.status))
+      .then(t => { pre.textContent = t.length > 200_000 ? t.slice(0, 200_000) + '\n\n… (truncated — download for the full file)' : t; })
+      .catch(() => { pre.outerHTML = `<div class="preview-note">${icon('file', 'icon-xl')}<span>No preview for this file.</span></div>`; });
+  }
+  const media = $('video, img', m);
+  media?.addEventListener('error', () => {
+    if (k === 'video') media.outerHTML = `<div class="preview-note">${icon('video', 'icon-xl')}<span>Your browser can't play this format. Download it instead.</span></div>`;
+  });
+}
+
+// ── Clipboard ─────────────────────────────────────────────────────────────────
+const CLIP_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+const CLIP_IMAGE_MAX = 10 * 1_048_576;
+let loadClips = () => {};
+
+async function saveClipboardText(text) {
+  try {
+    const { data } = await api('POST', '/api/clipboard/paste', {
+      content_type: 'text', content: text, expiry_minutes: (+store.get('yeet_expiry', '24') || 24) * 60, session_id: getSession(),
+    });
+    const copied = await copyText(data.share_url);
+    toast(copied ? 'Saved to the public clipboard — link copied' : 'Saved to the public clipboard', 'success');
+    $('#clipboard-panel')?.setAttribute('open', '');
+    loadClips();
+  } catch (e) { toast(e.message || 'Could not save text', 'error'); }
+}
+
+async function saveClipboardImage(blob) {
+  if (!CLIP_IMAGE_TYPES.includes(blob.type) || blob.size > CLIP_IMAGE_MAX) {
+    toast('Clipboard images must be PNG, JPEG, GIF or WebP under 10 MB — use a normal upload instead', 'warn', 7000);
+    return;
+  }
+  const dataUrl = await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(blob); });
+  try {
+    const { data } = await api('POST', '/api/clipboard/paste', {
+      content_type: 'image', content: dataUrl, expiry_minutes: (+store.get('yeet_expiry', '24') || 24) * 60, session_id: getSession(),
+    });
+    const copied = await copyText(data.share_url);
+    toast(copied ? 'Image saved to the public clipboard — link copied' : 'Image saved to the public clipboard', 'success');
+    $('#clipboard-panel')?.setAttribute('open', '');
+    loadClips();
+  } catch (e) { toast(e.message || 'Could not save image', 'error'); }
+}
+
+function openPasteModal() {
+  const m = $('#paste-modal');
+  const ta = $('#paste-textarea');
+  ta.value = '';
+  openModal(m);
+  navigator.clipboard?.readText?.().then(t => { if (t && !ta.value) ta.value = t; }).catch(() => {});
+}
+
+function initClipboard() {
+  const list = $('#clipboard-list'), empty = $('#clipboard-empty'), count = $('#clipboard-count'), panel = $('#clipboard-panel');
+  if (!list) return;
+  if (store.get('yeet_clip_open') === '1') panel.open = true;
+  panel.addEventListener('toggle', () => store.set('yeet_clip_open', panel.open ? '1' : '0'));
+  let items = [];
+
+  loadClips = async () => {
+    try {
+      const r = await fetch('/api/clipboard/recent?limit=50', { headers: { 'X-Session-ID': getSession() } });
+      items = (await r.json()).items || [];
+    } catch { return; }
+    count.textContent = items.length;
+    empty.classList.toggle('hidden', items.length > 0);
+    list.innerHTML = items.map(it => {
+      const img = it.type === 'image';
+      const exp = it.pinned ? 'pinned' : fmtExpiry(it.expires_at).label;
+      return `<article class="clip${it.is_yours ? ' yours' : ''}" data-id="${esc(it.id)}">
+        <a class="clip-preview" href="/c/${esc(it.id)}" target="_blank" rel="noopener">${img
+          ? `<img src="/api/clipboard/image/${esc(it.id)}" alt="" loading="lazy">`
+          : `<pre>${esc((it.preview || '').slice(0, 300))}</pre>`}</a>
+        <div class="clip-foot">${it.is_yours ? '<span class="tag you">you</span>' : ''}<span>${timeAgo(it.created_at)}</span><span class="spacer"></span>
+          <span title="${it.pinned ? 'Pinned' : 'Expires'}">${esc(exp)}</span>
+          <button class="icon-btn" type="button" data-clip="copy" aria-label="Copy">${icon('copy')}</button>
+          ${it.is_yours ? `<button class="icon-btn" type="button" data-clip="pin" aria-label="${it.pinned ? 'Unpin' : 'Pin'}">${icon('pin')}</button>
+          <button class="icon-btn danger" type="button" data-clip="del" aria-label="Delete">${icon('trash')}</button>` : ''}
+        </div></article>`;
+    }).join('');
+  };
+
+  list.addEventListener('click', async e => {
+    const b = e.target.closest('[data-clip]');
+    if (!b) return;
+    const id = b.closest('[data-id]').dataset.id;
+    const it = items.find(x => x.id === id);
+    if (b.dataset.clip === 'copy') {
+      if (it?.type === 'text') {
+        try { const t = await (await fetch(`/c/${id}/raw`)).text(); copyWithToast(t, 'Text copied'); } catch { toast('Copy failed', 'error'); }
+      } else copyWithToast(`${location.origin}/c/${id}`);
+    } else if (b.dataset.clip === 'pin') {
+      try { await api('POST', `/api/clipboard/pin/${id}`); loadClips(); } catch (err) { toast(err.message, 'error'); }
+    } else if (b.dataset.clip === 'del') {
+      if (!confirm('Delete this clipboard item?')) return;
+      try { await api('DELETE', `/api/clipboard/item/${id}`); loadClips(); toast('Deleted', 'success'); } catch (err) { toast(err.message, 'error'); }
+    }
+  });
+
+  $('#paste-save')?.addEventListener('click', async () => {
+    const ta = $('#paste-textarea');
+    const txt = ta.value.trim();
+    if (!txt) { toast('Nothing to save', 'warn'); ta.focus(); return; }
+    closeModal($('#paste-modal'));
+    await saveClipboardText(txt);
+  });
+  $('#paste-textarea')?.addEventListener('paste', async e => {
+    const f = Array.from(e.clipboardData?.items || []).find(i => i.type.startsWith('image/'))?.getAsFile();
+    if (f) { e.preventDefault(); closeModal($('#paste-modal')); await saveClipboardImage(f); }
+  });
+  const clipImg = $('#clip-image-input');
+  $('#paste-pick-img')?.addEventListener('click', () => { closeModal($('#paste-modal')); clipImg.click(); });
+  clipImg?.addEventListener('change', async () => {
+    const f = clipImg.files?.[0]; clipImg.value = '';
+    if (f) await saveClipboardImage(f);
+  });
+
+  loadClips();
+  setInterval(() => document.visibilityState === 'visible' && panel.open && loadClips(), 60_000);
+}
+
+function initScannerLog() {
+  const sec = $('#deleted-section'), out = $('#deleted-list');
+  sec?.addEventListener('toggle', async () => {
+    if (!sec.open || out.dataset.loaded) return;
+    out.dataset.loaded = '1';
+    try {
+      const entries = (await (await fetch('/api/virus-log')).json()).deletions || [];
+      out.innerHTML = entries.length
+        ? entries.map(e => `<div class="log-row"><span>${esc(e.filename)}</span><span class="muted">${timeAgo(e.ts)}</span></div>`).join('')
+        : '<p class="muted" style="margin:0;font-size:13.5px">Nothing rejected recently.</p>';
+    } catch { out.textContent = 'Could not load.'; }
+  });
+}
+
+// ── Share page (/f/<id> landing) ──────────────────────────────────────────────
+const share = $('#share');
+
+function initSharePage() {
+  const id = share.dataset.id;
+  const size = +share.dataset.size;
+  const name = share.dataset.name;
+  const burn = share.dataset.burn === '1';
+  let token = '';
+
+  const loadText = pre => {
+    if (!pre) return;
+    fetch(pre.dataset.src + (token ? `?token=${encodeURIComponent(token)}` : ''))
+      .then(r => r.ok ? r.text() : Promise.reject())
+      .then(t => { pre.textContent = t.length > 200_000 ? t.slice(0, 200_000) + '\n\n… (truncated)' : t; })
+      .catch(() => { pre.textContent = 'Preview unavailable.'; });
+  };
+  loadText($('#text-preview'));
+  $('#stage video')?.addEventListener('error', e => {
+    e.target.outerHTML = `<div class="preview-note">${icon('video', 'icon-xl')}<span>Your browser can't play this format — download it instead.</span></div>`;
+  });
+
+  // Unlock without a page reload, so the preview can appear too.
+  const form = $('#unlock-form');
+  form?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const pw = $('#dl-password').value;
+    const err = $('#unlock-error');
+    err.textContent = '';
+    try {
+      const r = await fetch('/api/verify-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file_id: id, password: pw }) });
+      const d = await r.json();
+      if (!d.success) { err.textContent = d.error || 'Incorrect password.'; return; }
+      token = d.token;
+      form.remove();
+      $('#dl-actions').classList.remove('hidden');
+      $('#dl-btn').href = d.download_url;
+      const stage = $('#stage'), kind = share.dataset.kind, src = d.preview_url;
+      if (stage && kind) {
+        stage.innerHTML = kind === 'image' ? `<img src="${src}" alt="">`
+          : kind === 'video' ? `<video src="${src}" controls playsinline preload="metadata"></video>`
+          : kind === 'audio' ? `<audio src="${src}" controls></audio>`
+          : kind === 'pdf' ? `<div class="preview-note">${icon('doc', 'icon-xl')}<a class="btn" href="${src}" target="_blank" rel="noopener">${icon('external')}Open PDF in a new tab</a></div>`
+          : `<pre data-src="/raw/${id}">Loading…</pre>`;
+        loadText($('pre[data-src]', stage));
+      }
+    } catch { err.textContent = 'Network error — try again.'; }
+  });
+
+  // Big files: fetch in 64 MB ranges straight to disk where the browser allows
+  // it (Chromium's file picker). Each piece retries on its own, so a flaky
+  // connection or proxy reset never restarts the whole download.
+  const btn = $('#dl-btn');
+  btn.addEventListener('click', async e => {
+    if (burn || size < 100 * 1_048_576 || typeof window.showSaveFilePicker !== 'function') return;
+    e.preventDefault();
+    let handle;
+    try { handle = await window.showSaveFilePicker({ suggestedName: name }); } catch { return; }
+    const writable = await handle.createWritable();
+    const prog = $('#dl-progress'), fill = $('#dl-fill'), stat = $('#dl-stat');
+    prog.classList.remove('hidden'); btn.classList.add('hidden');
+    const url = btn.getAttribute('href');
+    const PIECE = 64 * 1_048_576;
+    const t0 = performance.now();
+    try {
+      for (let off = 0; off < size; off += PIECE) {
+        const end = Math.min(size, off + PIECE) - 1;
+        const buf = await withRetry(async () => {
+          let r;
+          try { r = await fetch(url, { headers: { Range: `bytes=${off}-${end}` } }); } catch { throw new HttpError(0, {}); }
+          if (r.status !== 206 && !(r.status === 200 && off === 0 && end === size - 1)) throw new HttpError(r.status, safeJson(await r.text()));
+          return r.arrayBuffer();
+        });
+        await writable.write({ type: 'write', position: off, data: buf });
+        const done = end + 1;
+        fill.style.width = (done / size * 100).toFixed(1) + '%';
+        const rate = done / ((performance.now() - t0) / 1000);
+        stat.textContent = `${fmtSize(done)} of ${fmtSize(size)} · ${fmtSize(rate)}/s · ${fmtDuration((size - done) / rate)}`;
+      }
+      await writable.close();
+      stat.textContent = `Saved ${fmtSize(size)}`;
+      toast('Download complete', 'success');
+    } catch (err) {
+      await writable.abort?.().catch(() => {});
+      stat.textContent = '';
+      prog.classList.add('hidden'); btn.classList.remove('hidden');
+      toast(`Download failed: ${err.message}. Try again — or right-click Download and save normally.`, 'error');
+    }
+  });
+
+  $('#share-link')?.addEventListener('click', () => {
+    const url = location.origin + location.pathname;
+    if (canShare()) navigator.share({ title: name, url }).catch(() => {});
+    else copyWithToast(url);
+  });
+}
+
+// ── Folder + clipboard pages ──────────────────────────────────────────────────
+if (!share || !share.dataset.id) {
+  $('#share-link')?.addEventListener('click', () => {
+    const url = location.origin + location.pathname;
+    if (canShare()) navigator.share({ url }).catch(() => {});
+    else copyWithToast(url);
+  });
+}
+$('[data-copy-text]')?.addEventListener('click', () => copyWithToast($('#cb-content').textContent, 'Text copied'));
+$('[data-copy-image]')?.addEventListener('click', async e => {
+  try {
+    const blob = await (await fetch(e.currentTarget.dataset.copyImage)).blob();
+    await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+    toast('Image copied', 'success');
+  } catch { toast('Your browser cannot copy images — use Download instead', 'warn'); }
+});
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+// Last, so every top-level let/const above is initialised first.
+if (dropZone) initUploadPage();
+if (share && share.dataset.id && $('#dl-btn')) initSharePage();

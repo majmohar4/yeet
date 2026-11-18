@@ -1,65 +1,32 @@
 {% extends "base.html" %}
-{% block title %}Clipboard — Yeet{% endblock %}
+{% block title %}Clipboard — yeet{% endblock %}
 
 {% block content %}
-<div class="cb-view-page">
-
-  <div class="cb-view-header">
-    <span class="cb-view-icon">{% if item.type == 'image' %}🖼{% else %}📝{% endif %}</span>
-    <span class="cb-view-label">Shared clipboard item</span>
-    {% if item.encrypted %}<span class="cb-view-badge encrypted">🔒 Encrypted</span>{% endif %}
-    {% if item.pinned %}<span class="cb-view-badge pinned">📌 Pinned</span>{% endif %}
-    <span class="cb-view-meta">via Yeet</span>
+<div class="page">
+  <div class="share{% if item.type == 'text' %} no-preview{% endif %}" style="{% if item.type == 'text' %}grid-template-columns:minmax(0,820px){% endif %}">
+    {% if item.type == 'image' %}
+    <div class="share-stage"><img src="{{ item.image_url }}" alt="Shared image"></div>
+    {% endif %}
+    <section class="share-card">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span class="tag"><svg class="icon"><use href="#{{ 'i-image' if item.type == 'image' else 'i-text' }}"/></svg>{{ 'Image' if item.type == 'image' else 'Text' }}</span>
+        {% if item.pinned %}<span class="tag"><svg class="icon"><use href="#i-pin"/></svg>Pinned</span>{% endif %}
+        <span class="muted" style="font-size:13px">Public clipboard</span>
+      </div>
+      {% if item.type == 'text' %}
+      <pre class="codeblock" id="cb-content" style="max-height:60dvh;white-space:pre-wrap;word-break:break-word">{{ item.content }}</pre>
+      <div class="modal-actions" style="justify-content:flex-start">
+        <button class="btn btn-primary" type="button" id="copy-btn" data-copy-text><svg class="icon"><use href="#i-copy"/></svg>Copy text</button>
+        <a class="btn" href="/c/{{ item.id }}/raw" target="_blank" rel="noopener">Raw</a>
+      </div>
+      {% else %}
+      <div class="field">
+        <button class="btn btn-primary btn-block" type="button" id="copy-btn" data-copy-image="{{ item.image_url }}"><svg class="icon"><use href="#i-copy"/></svg>Copy image</button>
+        <a class="btn btn-block" href="{{ item.image_url }}" download><svg class="icon"><use href="#i-download"/></svg>Download</a>
+      </div>
+      {% endif %}
+      <p class="note">Anyone with the link — and every visitor to <a href="/">yeet</a> — can see this.</p>
+    </section>
   </div>
-
-  {% if item.type == 'text' %}
-  <div class="cb-view-card">
-    <pre class="cb-view-text" id="cb-content">{{ item.content }}</pre>
-  </div>
-  <div class="cb-view-actions">
-    <button class="btn-primary" id="copy-btn" onclick="copyText()">Copy text</button>
-    <a class="btn-ghost" href="/c/{{ item.id }}/raw" target="_blank">Raw</a>
-  </div>
-
-  {% else %}
-  <div class="cb-view-card cb-view-img-card">
-    <img src="{{ item.image_url }}" alt="Shared image" class="cb-view-img">
-  </div>
-  <div class="cb-view-actions">
-    <button class="btn-primary" id="copy-btn" onclick="copyImage()">Copy image</button>
-    <a class="btn-ghost" href="/c/{{ item.id }}/raw" download>Download</a>
-  </div>
-  {% endif %}
-
-  <div class="cb-view-footer">
-    <a href="/" class="footer-link" style="font-size:13px">← Share your own via Yeet</a>
-  </div>
-
 </div>
-
-<script>
-async function copyText() {
-  const btn = document.getElementById('copy-btn');
-  try {
-    await navigator.clipboard.writeText(document.getElementById('cb-content').textContent);
-    btn.textContent = '✓ Copied!';
-  } catch {
-    btn.textContent = 'Select text manually';
-  }
-  setTimeout(() => { btn.textContent = 'Copy text'; }, 2000);
-}
-
-async function copyImage() {
-  const btn = document.getElementById('copy-btn');
-  try {
-    const r = await fetch('{{ item.image_url }}');
-    const blob = await r.blob();
-    await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
-    btn.textContent = '✓ Copied!';
-  } catch {
-    btn.textContent = 'Right-click → Copy image';
-  }
-  setTimeout(() => { btn.textContent = 'Copy image'; }, 2500);
-}
-</script>
 {% endblock %}

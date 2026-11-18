@@ -1,6 +1,7 @@
 import asyncio
 import logging
-from datetime import datetime, timezone
+import time
+from datetime import datetime, timedelta, timezone
 
 from app.config import settings
 from app.database import get_db
@@ -64,6 +65,8 @@ async def run_cleanup() -> dict:
         deleted += 1
         logger.info("permanently deleted file %s", fid)
 
+    await _purge_partials(db)
+
     # Prune expired bypass codes
     await db.execute("DELETE FROM bypass_codes WHERE expires_at <= ?", (now,))
 
@@ -104,6 +107,47 @@ async def run_cleanup() -> dict:
     logger.info("cleanup done: archived=%d deleted=%d clipboard_deleted=%d",
                 archived, deleted, len(expired_clips))
     return {"archived": archived, "deleted": deleted, "expired_ids": expired}
+
+
+async def _purge_partials(db) -> None:
+    """Drop chunked uploads nobody finished, and folders that never got published."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=settings.PARTIAL_TTL_HOURS)).isoformat()
+    async with db.execute(
+        "SELECT id FROM uploads WHERE updated_at < ? AND status != 'processing'", (cutoff,)
+    ) as cursor:
+        stale = [row[0] for row in await cursor.fetchall()]
+    for uid in stale:
+        (settings.PARTIAL_DIR / uid).unlink(missing_ok=True)
+        await db.execute("DELETE FROM upload_chunks WHERE upload_id=?", (uid,))
+        await db.execute("DELETE FROM uploads WHERE id=?", (uid,))
+    if stale:
+        logger.info("purged %d abandoned uploads", len(stale))
+
+    async with db.execute(
+        # bundles.created_at uses SQLite's "YYYY-MM-DD HH:MM:SS" format, so compare
+        # in SQLite rather than against an ISO string.
+        "SELECT id FROM bundles WHERE pending=1 AND archived_at IS NULL "
+        "AND created_at < datetime('now', ?)",
+        (f"-{settings.PARTIAL_TTL_HOURS} hours",),
+    ) as cursor:
+        dead = [row[0] for row in await cursor.fetchall()]
+    now = datetime.now(timezone.utc).isoformat()
+    for bid in dead:
+        async with db.execute("SELECT id FROM files WHERE bundle_id=?", (bid,)) as cursor:
+            for (fid,) in await cursor.fetchall():
+                await archive_file(fid)
+                await db.execute("UPDATE files SET archived_at=? WHERE id=?", (now, fid))
+        await db.execute("UPDATE bundles SET archived_at=? WHERE id=?", (now, bid))
+
+    # Stray spool files from interrupted multipart uploads.
+    if settings.PARTIAL_DIR.exists():
+        limit = time.time() - settings.PARTIAL_TTL_HOURS * 3600
+        known = set()
+        async with db.execute("SELECT id FROM uploads") as cursor:
+            known = {row[0] for row in await cursor.fetchall()}
+        for entry in settings.PARTIAL_DIR.iterdir():
+            if entry.name not in known and entry.stat().st_mtime < limit:
+                entry.unlink(missing_ok=True)
 
 
 async def cleanup_loop() -> None:

@@ -1,11 +1,13 @@
 """
 Public file listing and virus-log API endpoints.
 """
+import secrets
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from app.config import settings
 from app.database import get_db
 from app.routes.upload import EXECUTABLE_EXTENSIONS, WEB_RENDERABLE_EXTENSIONS
 from app.services.storage import archive_file
@@ -28,8 +30,32 @@ def _safe_id(file_id: str) -> str | None:
     return None
 
 
+def owns(session: str, owner: str | None) -> bool:
+    """Constant-time ownership check for a session id.
+
+    Compared as bytes — compare_digest raises TypeError on non-ASCII str, and
+    the session arrives in a client-controlled header.
+    """
+    if not session or not owner:
+        return False
+    return secrets.compare_digest(session.encode("utf-8"), owner.encode("utf-8"))
+
+
+def annotate_ownership(rows: list[dict], session: str) -> list[dict]:
+    """Replace each row's `uploader_session` with a boolean `is_yours`.
+
+    The session id is the only thing standing between a visitor and deleting
+    someone else's upload, so it must never leave the server. The client only
+    needs to know whether a row is its own, to decide if it renders a delete
+    button.
+    """
+    for r in rows:
+        r["is_yours"] = owns(session, r.pop("uploader_session", None))
+    return rows
+
+
 @router.get("/api/files/all")
-async def get_all_files():
+async def get_all_files(request: Request):
     """Return active loose files + bundles (folders), newest first.
 
     Files that belong to a bundle are hidden from this listing — they show up
@@ -37,15 +63,24 @@ async def get_all_files():
     """
     db = await get_db()
     now = datetime.now(timezone.utc).isoformat()
+    session = request.headers.get("X-Session-ID", "").strip()
+
+    # PUBLIC_LISTING=false narrows the listing to the caller's own uploads, so
+    # filenames and sizes aren't readable by anyone who hits the endpoint.
+    scope = "" if settings.PUBLIC_LISTING else "AND uploader_session = ? "
+    params: tuple = (now,) if settings.PUBLIC_LISTING else (now, session)
+    if not settings.PUBLIC_LISTING and not session:
+        return JSONResponse({"files": [], "bundles": []})
+
     async with db.execute(
         "SELECT id, orig_name, file_size, mime_type, created_at, expires_at, "
         "download_count, max_downloads, scan_status, uploader_session, "
         "burn_after_read, claimed_at, "
         "(password_hash IS NOT NULL) as has_password "
         "FROM files WHERE archived_at IS NULL AND expires_at > ? "
-        "AND bundle_id IS NULL "
+        "AND bundle_id IS NULL " + scope +
         "ORDER BY created_at DESC",
-        (now,),
+        params,
     ) as cursor:
         files_rows = _annotate_dangerous([dict(r) for r in await cursor.fetchall()])
 
@@ -53,13 +88,16 @@ async def get_all_files():
         "SELECT id, name, file_count, total_size, created_at, expires_at, "
         "download_count, uploader_session, "
         "(password_hash IS NOT NULL) AS has_password "
-        "FROM bundles WHERE archived_at IS NULL AND expires_at > ? "
+        "FROM bundles WHERE archived_at IS NULL AND pending=0 AND expires_at > ? " + scope +
         "ORDER BY created_at DESC",
-        (now,),
+        params,
     ) as cursor:
         bundle_rows = [dict(r) for r in await cursor.fetchall()]
 
-    return JSONResponse({"files": files_rows, "bundles": bundle_rows})
+    return JSONResponse({
+        "files": annotate_ownership(files_rows, session),
+        "bundles": annotate_ownership(bundle_rows, session),
+    })
 
 
 @router.delete("/api/files/{file_id}")
@@ -83,7 +121,7 @@ async def delete_file_endpoint(request: Request, file_id: str):
     if not row:
         return JSONResponse({"error": "Not found."}, status_code=404)
 
-    if not row[0] or row[0] != session:
+    if not owns(session, row[0]):
         return JSONResponse({"error": "Forbidden."}, status_code=403)
 
     now = datetime.now(timezone.utc).isoformat()

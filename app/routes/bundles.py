@@ -6,12 +6,9 @@ own UUID on disk, own ClamAV scan, own expires_at). The `bundles` row holds the
 shared metadata (name, password, expiry, owner). Member files carry `bundle_id`
 and `bundle_path` so the listing can rebuild a directory tree.
 """
-import io
 import logging
-import mimetypes
 import os
 import re
-import tempfile
 import uuid
 import zipfile
 from datetime import datetime, timedelta, timezone
@@ -21,15 +18,18 @@ from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
+from app.config import settings
 from app.database import get_db
 from app.middleware.rate_limit import (
     _client_ip,
     check_upload_bandwidth,
+    consume_bypass_code,
+    peek_bypass_code,
     record_bandwidth,
-    validate_bypass_code,
 )
+from app.routes.files import annotate_ownership, owns
 from app.routes.upload import ALLOWED_EXTENSIONS, _check_extension
-from app.services import concurrent, storage, virus_scan
+from app.services import concurrent, ingest, storage
 from app.services.config_manager import (
     get_file_expiry_hours,
     get_max_file_size,
@@ -40,7 +40,7 @@ logger = logging.getLogger("yeet.bundles")
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
 
-MAX_BUNDLE_FILES = 200
+MAX_BUNDLE_FILES = 500
 _PATH_SAFE = re.compile(r"[^\w\s\-./]")
 
 
@@ -91,7 +91,7 @@ async def upload_bundle(
             status_code=413,
         )
 
-    bypassed = await validate_bypass_code(bypass_code)
+    bypassed = await peek_bypass_code(bypass_code)
     max_file = get_max_file_size()
     storage_limit = get_storage_limit()
 
@@ -108,6 +108,7 @@ async def upload_bundle(
         return await _do_bundle_upload(
             request, files, paths, name, password, ip, ua,
             max_file, storage_limit, bypassed, session_id, expiry_hours,
+            bypass_code,
         )
     finally:
         await concurrent.release(ip)
@@ -116,138 +117,89 @@ async def upload_bundle(
 async def _do_bundle_upload(
     request, files, paths_csv, bundle_name, password, ip, ua,
     max_file, storage_limit, bypassed, session_id, expiry_hours,
+    bypass_code="",
 ):
-    # ── Resolve relative paths ────────────────────────────────────────────────
     raw_paths = [p for p in (paths_csv or "").split("\n") if p]
     if raw_paths and len(raw_paths) != len(files):
         return JSONResponse({"error": "paths/files length mismatch."}, status_code=400)
-
-    rel_paths: list[str] = []
-    for i, f in enumerate(files):
-        raw = raw_paths[i] if raw_paths else (f.filename or f"file_{i}")
-        rel_paths.append(_sanitize_path(raw))
-
-    # ── Read everything (fail fast on size) ───────────────────────────────────
-    blobs: list[bytes] = []
-    total = 0
-    for f in files:
-        data = await f.read(max_file + 1)
-        if not bypassed and len(data) > max_file:
-            return JSONResponse(
-                {"error": f"File '{f.filename}' too large. Max {max_file // 1_048_576} MB per file."},
-                status_code=413,
-            )
-        blobs.append(data)
-        total += len(data)
-
-    # ── Storage cap ───────────────────────────────────────────────────────────
-    used = storage.get_total_storage()
-    if not bypassed and (used + total) >= storage_limit * 0.9:
-        return JSONResponse(
-            {"error": "Storage limit reached. Contact info@majmohar.eu"},
-            status_code=507,
-        )
-
-    # ── Bandwidth ─────────────────────────────────────────────────────────────
-    if not bypassed:
-        bw = await check_upload_bandwidth(ip, total)
-        if not bw["allowed"]:
-            return JSONResponse(
-                {
-                    "error": (
-                        f"Daily upload limit reached "
-                        f"({bw['limit'] // 1_048_576} MB/day). "
-                        f"Resets in {bw['reset_in_hours']:.1f}h."
-                    ),
-                    "bandwidth": bw,
-                },
-                status_code=429,
-                headers={"Retry-After": str(int(bw["reset_in_hours"] * 3600))},
-            )
-
-    # ── Per-file extension check + virus scan ─────────────────────────────────
+    rel_paths = [
+        _sanitize_path(raw_paths[i] if raw_paths else (f.filename or f"file_{i}"))
+        for i, f in enumerate(files)
+    ]
     for f in files:
         err = _check_extension(f.filename or "")
         if err:
             return JSONResponse({"error": f"{f.filename}: {err}"}, status_code=400)
 
-    scan_results = []
-    for i, data in enumerate(blobs):
-        status, threat = virus_scan.scan_bytes(data)
-        if status == "infected":
-            await _audit(ip, ua, "virus_detected", None,
-                         f"filename:{files[i].filename},threat:{threat}")
-            return JSONResponse(
-                {"error": f"Bundle rejected: '{files[i].filename}' contains malware ({threat})."},
-                status_code=422,
-            )
-        scan_results.append(status)
+    # Spool every member to disk first (never into memory), then check limits
+    # against the real total.
+    from app.routes.upload import spool
+    spooled = []
+    try:
+        for f in files:
+            result, size = await spool(f, None if bypassed else max_file)
+            if isinstance(result, JSONResponse):
+                return result
+            spooled.append((result, size))
+        total = sum(size for _, size in spooled)
+        rejected = await ingest.precheck(total, ip, bypassed)
+        if rejected is not None:
+            return rejected
 
-    # ── Save bundle + members ─────────────────────────────────────────────────
-    bundle_id = uuid.uuid4().hex
-    expiry_h = get_file_expiry_hours()
-    if expiry_hours.strip().isdigit():
-        requested = int(expiry_hours.strip())
-        if 1 <= requested <= 168:
-            expiry_h = requested
-    expires_at = (datetime.now(timezone.utc) + timedelta(hours=expiry_h)).isoformat()
+        bundle_id = uuid.uuid4().hex
+        expires_at = (
+            datetime.now(timezone.utc) + timedelta(hours=ingest.parse_expiry(expiry_hours))
+        ).isoformat()
+        pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode() if password else None
+        display_name = (bundle_name or "").strip()[:120]
+        if not display_name:
+            first = rel_paths[0].split("/", 1)[0] if rel_paths else ""
+            if first and all(p.startswith(first + "/") or p == first for p in rel_paths):
+                display_name = first
+            else:
+                display_name = f"Folder ({len(files)} files)"
+        session = ingest.parse_session(session_id)
 
-    safe_session = session_id.strip()[:64] if session_id else None
-    pw_hash = None
-    if password:
-        pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+        db = await get_db()
+        await db.execute(
+            """INSERT INTO bundles
+               (id, name, password_hash, expires_at, file_count, total_size,
+                client_ip, uploader_session, pending)
+               VALUES (?,?,?,?,?,?,?,?,1)""",
+            (bundle_id, display_name, pw_hash, expires_at, 0, 0, ip, session),
+        )
+        await db.commit()
 
-    # Bundle name: user-provided, else common path prefix, else generic
-    display_name = (bundle_name or "").strip()[:120]
-    if not display_name:
-        first_seg = rel_paths[0].split("/", 1)[0] if rel_paths else ""
-        if first_seg and all(p.startswith(first_seg + "/") or p == first_seg for p in rel_paths):
-            display_name = first_seg
-        else:
-            display_name = f"Bundle ({len(files)} files)"
-
-    db = await get_db()
-    await db.execute(
-        """INSERT INTO bundles
-           (id, name, password_hash, expires_at, file_count, total_size,
-            client_ip, uploader_session)
-           VALUES (?,?,?,?,?,?,?,?)""",
-        (bundle_id, display_name, pw_hash, expires_at, len(files), total,
-         ip, safe_session),
-    )
-
-    for i, (f, data, rel) in enumerate(zip(files, blobs, rel_paths)):
-        file_id = uuid.uuid4().hex
-        safe_name = storage.sanitize_filename(f.filename or rel.split("/")[-1])
-        file_hash = storage.hash_bytes(data)
-        mime_type = mimetypes.guess_type(safe_name)[0] or "application/octet-stream"
-        await storage.save_file(file_id, data)
+        base = ingest.base_url(request)
+        for (tmp, _), f, rel in zip(spooled, files, rel_paths):
+            code, body = await ingest.finalize(tmp, ingest.UploadMeta(
+                orig_name=f.filename or rel.split("/")[-1], ip=ip, ua=ua, base_url=base,
+                password_hash=pw_hash, session=session, bypassed=bypassed,
+                bundle_id=bundle_id, bundle_path=rel, expires_at=expires_at,
+            ))
+            if code != 201:
+                await _discard_bundle(bundle_id)
+                if code == 422:
+                    body["error"] = f"Folder rejected: '{f.filename}' — {body['error']}"
+                return JSONResponse(body, status_code=code)
 
         await db.execute(
-            """INSERT INTO files
-               (id, filename, orig_name, file_hash, file_size, mime_type,
-                password_hash, expires_at, client_ip, scan_status,
-                uploader_session, bundle_id, bundle_path)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                file_id, safe_name, f.filename or rel.split("/")[-1],
-                file_hash, len(data), mime_type,
-                pw_hash, expires_at, ip, scan_results[i],
-                safe_session, bundle_id, rel,
-            ),
+            "UPDATE bundles SET pending=0, file_count=?, total_size=? WHERE id=?",
+            (len(files), total, bundle_id),
         )
+        await db.commit()
+    finally:
+        for tmp, _ in spooled:
+            tmp.unlink(missing_ok=True)
 
-    await db.commit()
-
-    await record_bandwidth(ip, total)
+    if bypassed:
+        await consume_bypass_code(bypass_code)
     await _audit(ip, ua, "upload_bundle", bundle_id,
                  f"files:{len(files)},size:{total},bypassed:{bypassed}")
-
-    bundle_url = str(request.base_url).rstrip("/") + f"/b/{bundle_id}"
     return JSONResponse(
         {
             "id": bundle_id,
-            "url": bundle_url,
+            "url": f"{base}/b/{bundle_id}",
             "expires_at": expires_at,
             "file_count": len(files),
             "total_size": total,
@@ -255,6 +207,17 @@ async def _do_bundle_upload(
         },
         status_code=201,
     )
+
+
+async def _discard_bundle(bundle_id: str) -> None:
+    db = await get_db()
+    async with db.execute("SELECT id FROM files WHERE bundle_id=?", (bundle_id,)) as cur:
+        ids = [r[0] for r in await cur.fetchall()]
+    for fid in ids:
+        await storage.delete_file(fid)
+    await db.execute("DELETE FROM files WHERE bundle_id=?", (bundle_id,))
+    await db.execute("DELETE FROM bundles WHERE id=?", (bundle_id,))
+    await db.commit()
 
 
 @router.get("/b/{bundle_id}")
@@ -270,7 +233,8 @@ async def view_bundle(request: Request, bundle_id: str):
     db = await get_db()
     now = datetime.now(timezone.utc).isoformat()
     async with db.execute(
-        "SELECT * FROM bundles WHERE id=? AND archived_at IS NULL AND expires_at > ?",
+        "SELECT * FROM bundles WHERE id=? AND archived_at IS NULL AND pending=0 "
+        "AND expires_at > ?",
         (bundle_id, now),
     ) as cur:
         b = await cur.fetchone()
@@ -323,7 +287,7 @@ async def download_bundle_zip(request: Request, bundle_id: str):
     now = datetime.now(timezone.utc).isoformat()
     async with db.execute(
         "SELECT id, name, password_hash FROM bundles "
-        "WHERE id=? AND archived_at IS NULL AND expires_at > ?",
+        "WHERE id=? AND archived_at IS NULL AND pending=0 AND expires_at > ?",
         (bundle_id, now),
     ) as cur:
         b = await cur.fetchone()
@@ -342,61 +306,82 @@ async def download_bundle_zip(request: Request, bundle_id: str):
     if not members:
         return JSONResponse({"error": "Empty bundle."}, status_code=404)
 
-    # Write the zip to a temp file on disk so we don't blow memory on large
-    # bundles. The temp file is unlinked immediately; the open fd keeps the
-    # data alive until the response is fully streamed.
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip", prefix="yeet-bundle-")
-    try:
-        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
-            seen: dict[str, int] = {}
-            for fid, bpath, oname in members:
-                arc = bpath or oname or fid
-                if arc in seen:
-                    seen[arc] += 1
-                    base, _, ext = arc.rpartition(".")
-                    arc = f"{base}_{seen[arc]}.{ext}" if base else f"{arc}_{seen[arc]}"
-                else:
-                    seen[arc] = 0
-                path = storage.get_file_path(fid)
-                if path.exists():
-                    zf.write(path, arcname=arc)
-        tmp.flush()
-        size = os.path.getsize(tmp.name)
-        tmp.close()
-    except Exception:
-        try: tmp.close()
-        except Exception: pass
-        try: os.unlink(tmp.name)
-        except Exception: pass
-        raise
+    entries = []
+    seen: dict[str, int] = {}
+    for fid, bpath, oname in members:
+        arc = bpath or oname or fid
+        if arc in seen:
+            seen[arc] += 1
+            base, _, ext = arc.rpartition(".")
+            arc = f"{base}_{seen[arc]}.{ext}" if base else f"{arc}_{seen[arc]}"
+        else:
+            seen[arc] = 0
+        path = storage.get_file_path(fid)
+        if path.exists():
+            entries.append((path, arc))
 
-    bundle_name = (b[1] or "bundle") + ".zip"
     await db.execute(
         "UPDATE bundles SET download_count = download_count + 1 WHERE id=?",
         (bundle_id,),
     )
     await db.commit()
 
-    def _iter_and_clean(path: str):
-        try:
-            with open(path, "rb") as fh:
-                while True:
-                    chunk = fh.read(64 * 1024)
-                    if not chunk:
-                        break
-                    yield chunk
-        finally:
-            try: os.unlink(path)
-            except Exception: pass
-
     return StreamingResponse(
-        _iter_and_clean(tmp.name),
+        _stream_zip(entries),
         media_type="application/zip",
-        headers={
-            "Content-Disposition": storage.content_disposition(bundle_name),
-            "Content-Length": str(size),
-        },
+        headers={"Content-Disposition": storage.content_disposition((b[1] or "folder") + ".zip")},
     )
+
+
+# Already-compressed formats are stored as-is: deflating them burns CPU for ~0%.
+_STORE_EXTS = {
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".heif",
+    ".mp4", ".mov", ".m4v", ".mkv", ".webm", ".avi", ".mp3", ".m4a", ".aac",
+    ".flac", ".ogg", ".opus", ".zip", ".7z", ".rar", ".gz", ".xz", ".zst",
+    ".bz2", ".pdf", ".docx", ".xlsx", ".pptx", ".jar", ".apk", ".dmg", ".iso",
+}
+
+
+class _ZipSink:
+    """Write-only file object zipfile can target; we drain it after each write."""
+
+    def __init__(self) -> None:
+        self.parts: list[bytes] = []
+        self.pos = 0
+
+    def write(self, data) -> int:
+        self.parts.append(bytes(data))
+        self.pos += len(data)
+        return len(data)
+
+    def tell(self) -> int:
+        return self.pos
+
+    def flush(self) -> None:
+        pass
+
+    def drain(self) -> bytes:
+        out = b"".join(self.parts)
+        self.parts.clear()
+        return out
+
+
+def _stream_zip(entries):
+    """Build the zip while sending it — no temp copy, constant memory."""
+    sink = _ZipSink()
+    with zipfile.ZipFile(sink, "w", allowZip64=True) as zf:
+        for path, arc in entries:
+            ext = os.path.splitext(arc)[1].lower()
+            method = zipfile.ZIP_STORED if ext in _STORE_EXTS else zipfile.ZIP_DEFLATED
+            info = zipfile.ZipInfo.from_file(path, arcname=arc)
+            info.compress_type = method
+            with open(path, "rb") as src, zf.open(info, "w", force_zip64=True) as dst:
+                while chunk := src.read(1_048_576):
+                    dst.write(chunk)
+                    if sink.pos and sink.parts:
+                        yield sink.drain()
+            yield sink.drain()
+    yield sink.drain()
 
 
 @router.delete("/api/bundles/{bundle_id}")
@@ -417,7 +402,7 @@ async def delete_bundle(request: Request, bundle_id: str):
         row = await cur.fetchone()
     if not row:
         return JSONResponse({"error": "Not found."}, status_code=404)
-    if not row[0] or row[0] != session:
+    if not owns(session, row[0]):
         return JSONResponse({"error": "Forbidden."}, status_code=403)
 
     now = datetime.now(timezone.utc).isoformat()
@@ -436,19 +421,26 @@ async def delete_bundle(request: Request, bundle_id: str):
 
 
 @router.get("/api/bundles/all")
-async def list_bundles():
+async def list_bundles(request: Request):
     db = await get_db()
     now = datetime.now(timezone.utc).isoformat()
+    session = request.headers.get("X-Session-ID", "").strip()
+
+    scope = "" if settings.PUBLIC_LISTING else "AND uploader_session = ? "
+    params: tuple = (now,) if settings.PUBLIC_LISTING else (now, session)
+    if not settings.PUBLIC_LISTING and not session:
+        return JSONResponse({"bundles": []})
+
     async with db.execute(
         "SELECT id, name, file_count, total_size, created_at, expires_at, "
         "download_count, uploader_session, "
         "(password_hash IS NOT NULL) AS has_password "
-        "FROM bundles WHERE archived_at IS NULL AND expires_at > ? "
+        "FROM bundles WHERE archived_at IS NULL AND pending=0 AND expires_at > ? " + scope +
         "ORDER BY created_at DESC",
-        (now,),
+        params,
     ) as cur:
         rows = [dict(r) for r in await cur.fetchall()]
-    return JSONResponse({"bundles": rows})
+    return JSONResponse({"bundles": annotate_ownership(rows, session)})
 
 
 async def _audit(ip, ua, action, file_id, details=None):

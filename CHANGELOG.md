@@ -6,6 +6,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), version
 
 ---
 
+## [1.2.0] — 2026-11-18
+
+### Added
+- Chunked, resumable uploads (`/api/uploads`, `/api/bundles`) — 16 MB pieces, parallel, per-chunk retries, resume after reload. Large files now work behind Cloudflare's 100 MB request limit.
+- HTTP Range downloads for `/f/` and `/raw/`: resumable downloads, iOS video playback, 64 MB ranged downloads in Chromium and in `yeet download`.
+- Landing page for shared links with image/video/audio/text preview; scripts and `?dl=1` still get the raw file.
+- `yeet upload` uses chunks and `--expiry`; `yeet download` resumes partial downloads.
+- `YEET_DATA_DIR`, `CONTACT_EMAIL`, `CHUNK_SIZE`, `MIN_FREE_DISK_MB`, `MAX_ACTIVE_UPLOADS`, `PARTIAL_TTL_HOURS` settings.
+
+### Changed
+- Redesigned UI: calmer palette, SVG icons instead of emoji, mobile-first layout, Mine/Everyone file list, progress with speed and ETA, retry/cancel, share sheet on phones.
+- Uploads, scans and folder zips stream from disk — nothing is held in memory. Disk space is reserved up front.
+- Virus scan runs in the background after the last chunk; clamd `MaxScanTime` raised to 10 minutes for big media.
+
+### Fixed
+- Photo button sent images to the clipboard endpoint, so HEIC and photos over 10 MB always failed; it now uploads them as files and opens the gallery instead of forcing the camera.
+- A full disk crashed uploads and deletes with a bare 500; it now returns a clear 507.
+- Single-download links were consumed by chat-app link previews.
+- A threat name containing "OK" could be reported as clean.
+
 ## [1.1.0] — 2026-05-09
 
 ### Added

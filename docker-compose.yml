@@ -15,8 +15,11 @@ services:
     ports:
       - "127.0.0.1:4534:8000"     # bind localhost only — expose via reverse proxy
     volumes:
-      - ./config:/app/config              # Local config
-      - /home/home/Video/Yeet:/data       # Files on same disk as Video
+      # Uploads, SQLite DB, config.json and ClamAV signatures. Set YEET_DATA_DIR in
+      # .env to put them on a big disk. Use a plain filesystem with real free
+      # space: pooled mounts (mergerfs with minfreespace) can refuse new files
+      # while `df` still reports space.
+      - ${YEET_DATA_DIR:-./data}:/data
     env_file:
       - .env                       # SECRET_KEY, ADMIN_PASSWORD, overrides
     environment:
@@ -25,7 +28,7 @@ services:
       resources:
         limits:
           cpus: "1.5"
-          memory: 1536M            # ClamAV needs ~700MB RAM for definitions
+          memory: 1536M            # clamd needs ~1GB while running (on demand, see CLAMAV_IDLE_MINUTES)
         reservations:
           memory: 256M
     healthcheck:
@@ -39,8 +42,3 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-
-volumes:
-  # Uploads, archived files, SQLite database, config.json, ClamAV virus definitions
-  yeet_data:
-    driver: local

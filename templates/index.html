@@ -1,191 +1,212 @@
 {% extends "base.html" %}
-{% block title %}Yeet — temporary file sharing{% endblock %}
+{% block title %}yeet — send a file, get a link{% endblock %}
 
 {% block content %}
+<section class="intro">
+  <h1>Send a file, get a link.</h1>
+  <p>Up to {{ max_file_bytes|filesize }} per file, virus-scanned, gone after the time you choose.</p>
+</section>
 
-<!-- ── Unified drop zone ──────────────────────────────────── -->
-<div class="drop-zone{% if storage_blocked %} disabled{% endif %}" id="drop-zone" tabindex="0" role="button" aria-label="Upload area">
-  <div class="dz-border"></div>
-  <div class="dz-glow"></div>
-
-  <div class="dz-prompt" id="dz-prompt">
-    <span class="dz-icon">⬆</span>
-    <div class="dz-title">Drop files, or <span class="accent">click to browse</span></div>
-    <div class="dz-sub">
-      <span class="dz-sub-desktop">Paste <kbd>Ctrl</kbd>+<kbd>V</kbd> anywhere</span>
-      <span class="dz-sub-mobile">Tap below to paste text or pick an image</span>
-      &middot; {{ max_file_mb }}MB max
-    </div>
-    <div class="dz-quick-actions">
-      <button type="button" class="dz-quick-btn" id="quick-paste" title="Paste text or image">
-        <span class="dz-quick-ico">📋</span>
-        <span class="dz-quick-lbl">Paste</span>
-      </button>
-      <button type="button" class="dz-quick-btn" id="quick-photo" title="Pick from camera or photo library">
-        <span class="dz-quick-ico">🖼</span>
-        <span class="dz-quick-lbl">Photo</span>
-      </button>
-      <button type="button" class="dz-quick-btn" id="quick-folder" title="Upload a folder">
-        <span class="dz-quick-ico">📁</span>
-        <span class="dz-quick-lbl">Folder</span>
-      </button>
-    </div>
-  </div>
-
-  <div class="dz-controls" id="dz-controls">
-    <div class="dz-pw-group">
-      <input class="form-input" type="password" id="dz-password" placeholder="🔒 Password (optional)" autocomplete="new-password">
-      <button class="icon-input-btn" id="dz-gen-pw" title="Generate password">🎲</button>
-    </div>
-    <div class="dz-options">
-      <span class="dz-option-label">Expiry:</span>
-      <div class="expiry-chips" id="expiry-chips">
-        <button class="chip" data-hours="1">1h</button>
-        <button class="chip" data-hours="24">24h</button>
-        <button class="chip" data-hours="168">7d</button>
+<section class="composer" aria-label="Upload">
+  <div class="dropzone{% if storage_blocked %} disabled{% endif %}" id="drop-zone" tabindex="0" role="button"
+       aria-label="Choose files to upload, or drop them here">
+    <div class="dz-head">
+      <span class="dz-icon"><svg class="icon"><use href="#i-upload"/></svg></span>
+      <div>
+        <div class="dz-title"><span class="only-pointer">Drop files or a folder here, or <span class="accent">browse</span></span><span class="only-touch">Tap to choose files</span></div>
+        <div class="dz-sub"><span class="only-pointer">You can also paste with <kbd>Ctrl</kbd>+<kbd>V</kbd>. </span>Large files are sent in pieces and resume after a dropped connection.</div>
       </div>
-      <label class="dz-burn-toggle" title="Delete the file after the first download">
-        <input type="checkbox" id="dz-burn">
-        <span>🔥 Burn after read</span>
-      </label>
+    </div>
+    <div class="dz-actions">
+      <button type="button" class="dz-action" id="quick-files"><svg class="icon"><use href="#i-files"/></svg>Files</button>
+      <button type="button" class="dz-action" id="quick-photo"><svg class="icon"><use href="#i-image"/></svg>Photos &amp; videos</button>
+      <button type="button" class="dz-action" id="quick-folder"><svg class="icon"><use href="#i-folder"/></svg>Folder</button>
+      <button type="button" class="dz-action" id="quick-paste"><svg class="icon"><use href="#i-clipboard"/></svg>Paste</button>
     </div>
   </div>
-</div>
+
+  <aside class="options" aria-label="Upload options">
+    <h2 class="options-title">Options</h2>
+    <div class="field">
+      <span class="field-label" id="expiry-label">Delete after</span>
+      <div class="segmented" id="expiry-chips" role="group" aria-labelledby="expiry-label">
+        <button type="button" data-hours="1">1 hour</button>
+        <button type="button" data-hours="24">1 day</button>
+        <button type="button" data-hours="168">7 days</button>
+      </div>
+    </div>
+    <div class="field">
+      <label class="field-label" for="dz-password">Password <span class="muted">(optional)</span></label>
+      <div class="input-group">
+        <input class="input" type="password" id="dz-password" autocomplete="new-password" placeholder="No password" spellcheck="false">
+        <div class="input-actions">
+          <button class="icon-btn" type="button" id="dz-show-pw" aria-label="Show password" title="Show"><svg class="icon"><use href="#i-eye"/></svg></button>
+          <button class="icon-btn" type="button" id="dz-gen-pw" aria-label="Generate a password" title="Generate"><svg class="icon"><use href="#i-key"/></svg></button>
+        </div>
+      </div>
+      <span class="field-help">Recipients type it before they can preview or download.</span>
+    </div>
+    <label class="switch">
+      <input type="checkbox" id="dz-burn">
+      <span class="switch-track"></span>
+      <span class="switch-text">Single download<small>Deleted right after the first download. Not for folders.</small></span>
+    </label>
+    <div class="limits">
+      <div class="limit"><b>{{ max_file_bytes|filesize }}</b><span>per file</span></div>
+      <div class="limit"><b>ClamAV</b><span>scans every upload</span></div>
+    </div>
+  </aside>
+</section>
+
 <input type="file" id="file-input" multiple hidden>
-<input type="file" id="photo-input" accept="image/*" capture="environment" hidden>
-
-<!-- ── Paste modal (mobile/tablet helper) ────────────────── -->
-<div class="modal-overlay hidden" id="paste-modal" role="dialog" aria-modal="true">
-  <div class="modal-box">
-    <div class="modal-header">
-      <span class="modal-title">📋 Paste here</span>
-      <button class="modal-close" id="paste-close">✕</button>
-    </div>
-    <div class="modal-body">
-      <p class="paste-help">Long-press the box below and pick <b>Paste</b>, or just type. Pasting an image works too on most browsers.</p>
-      <textarea class="paste-textarea" id="paste-textarea" rows="6" placeholder="Tap and hold here, then choose Paste…" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
-      <div class="paste-modal-actions">
-        <button class="btn-ghost" id="paste-clear" type="button">Clear</button>
-        <button class="btn-primary" id="paste-save" type="button">Save text</button>
-      </div>
-      <div class="paste-modal-divider">or</div>
-      <button class="btn-ghost paste-pick-img" id="paste-pick-img" type="button">📷 Pick image instead</button>
-    </div>
-  </div>
-</div>
-
-<!-- ── Active uploads ────────────────────────────────────── -->
-<div class="active-uploads" id="active-uploads" style="display:none"></div>
-
-<!-- ── Upload result ─────────────────────────────────────── -->
-<div class="upload-result hidden" id="upload-result">
-  <span class="upload-result-label">✓ link ready</span>
-  <span class="upload-result-url" id="upload-result-url"></span>
-  <button class="upload-result-copy" id="upload-result-copy" onclick="copyResult()">copy</button>
-  <button class="upload-result-dismiss" onclick="dismissResult()" title="Dismiss">×</button>
-</div>
-
-<!-- ── Clipboard panel (public feed) ─────────────────────── -->
-<details class="clipboard-panel" id="clipboard-panel" open>
-  <summary>
-    📋 Public clipboard
-    <span class="clipboard-count" id="clipboard-count">0</span>
-    <span class="clipboard-hint">— recent pastes from everyone</span>
-  </summary>
-  <div class="clipboard-empty hidden" id="clipboard-empty">
-    No pastes yet. Press <kbd>Ctrl</kbd>+<kbd>V</kbd> or tap <b>📋 Paste</b> above to add the first one.
-  </div>
-  <div class="clipboard-list" id="clipboard-list"></div>
-  <div class="clipboard-foot">Anyone can read these items. Only you can pin or delete the ones you posted.</div>
-</details>
-
-<!-- ── File grid ─────────────────────────────────────────── -->
-<div class="section-header">
-  <div class="section-title">
-    Your uploads
-    <span class="file-count" id="file-count">0</span>
-  </div>
-  <div class="section-actions">
-    <select class="sort-select" id="sort-select">
-      <option value="recent">Newest first</option>
-      <option value="expiry">Expiring soon</option>
-      <option value="size">Largest first</option>
-      <option value="name">Name A–Z</option>
-    </select>
-  </div>
-</div>
-
+<input type="file" id="photo-input" accept="image/*,video/*" multiple hidden>
 <input type="file" id="folder-input" webkitdirectory directory multiple hidden>
 
-<div class="file-grid" id="file-grid"></div>
-
-<!-- ── Deleted / scanner log ─────────────────────────────── -->
-<div class="deleted-wrap">
-  <details class="deleted-section" id="deleted-section">
-    <summary>⚠ Recently removed files (security log)</summary>
-    <div class="deleted-list" id="deleted-list"></div>
-  </details>
-</div>
-
-<!-- ── Privacy policy ────────────────────────────────────── -->
-<details class="privacy-section" id="privacy-details">
-  <summary class="privacy-toggle">🔐 Privacy &amp; data policy</summary>
-  <div class="privacy-content">
-    <div class="privacy-col">
-      <h5>What we collect</h5>
-      <ul>
-        <li>Files, folders, and clipboard items you upload — stored on our servers</li>
-        <li>IP addresses (rate limiting &amp; abuse prevention)</li>
-        <li>Upload timestamps and file metadata</li>
-        <li>Browser session ID stored in localStorage (for delete/pin permissions)</li>
-      </ul>
-      <h5>What we don't collect</h5>
-      <ul>
-        <li>No accounts, email addresses, or names required</li>
-        <li>No browsing history or cross-site tracking</li>
-        <li>No third-party analytics or ad trackers</li>
-        <li>No file content analysis (virus scanning only)</li>
-      </ul>
-      <h5>Security</h5>
-      <ul>
-        <li>All connections encrypted via HTTPS</li>
-        <li>Virus scanning on every upload (ClamAV)</li>
-        <li>Rate limiting + per-IP daily upload bandwidth cap</li>
-        <li>Password hashing with bcrypt (we never see your passwords)</li>
-        <li>HTML/SVG/JS uploads can never render or execute through this site — they are served as source text. Executables are download-only.</li>
-        <li>🔥 Burn-after-read files are wiped from disk the instant they are served</li>
-      </ul>
-    </div>
-    <div class="privacy-col">
-      <h5>Data retention</h5>
-      <ul>
-        <li>Files expire after your chosen time (1h – 7d)</li>
-        <li>Expired files archived for 24h (server access only), then permanently deleted</li>
-        <li>Burn-after-read files skip the archive — gone immediately on first download</li>
-        <li>Audit logs retained for 90 days for abuse investigation</li>
-        <li>IP-based rate limit entries deleted after 2 hours</li>
-      </ul>
-      <h5>Public clipboard ⚠</h5>
-      <ul>
-        <li>The 📋 <b>Public clipboard</b> panel is global — every visitor sees every non-expired paste</li>
-        <li>Don't put secrets, credentials, or personal data in there</li>
-        <li>Only you can pin or delete the items you posted (verified via your browser session)</li>
-      </ul>
-      <h5>Your rights</h5>
-      <ul>
-        <li>Delete your own files and clipboard items anytime from the session you uploaded them</li>
-        <li>Everything auto-deletes after expiry — no residual copies</li>
-        <li>No account needed; nothing tied to your identity</li>
-      </ul>
-      <h5>Abuse &amp; DMCA</h5>
-      <p>We do not tolerate illegal, harmful, or copyrighted content uploaded without permission. Files will be removed immediately upon valid report.</p>
-      <p>Contact: <a href="mailto:info@majmohar.eu">info@majmohar.eu</a></p>
+<section class="hidden" id="queue-wrap" aria-live="polite">
+  <div class="queue-head">
+    <h2>Uploads</h2>
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-quiet" type="button" id="copy-all" hidden><svg class="icon"><use href="#i-copy"/></svg>Copy all links</button>
+      <button class="btn btn-quiet" type="button" id="clear-done">Clear finished</button>
     </div>
   </div>
-</details>
+  <div class="queue" id="queue"></div>
+</section>
 
+<section class="section" aria-labelledby="files-title">
+  <div class="section-head">
+    <h2 id="files-title">Files <span class="count" id="file-count">0</span></h2>
+    <div class="section-tools">
+      <div class="segmented small" id="scope" role="group" aria-label="Show">
+        <button type="button" data-scope="mine" aria-pressed="true">Mine</button>
+        <button type="button" data-scope="all" aria-pressed="false">Everyone</button>
+      </div>
+      <label class="search"><span class="sr-only">Search files</span>
+        <svg class="icon"><use href="#i-search"/></svg>
+        <input class="input" id="search-input" type="search" placeholder="Search" autocomplete="off">
+      </label>
+      <select class="select" id="sort-select" aria-label="Sort">
+        <option value="recent">Newest</option>
+        <option value="expiry">Expiring soon</option>
+        <option value="size">Largest</option>
+        <option value="name">Name</option>
+      </select>
+    </div>
+  </div>
+  <div id="file-list">
+    <div class="rows" aria-hidden="true">
+      <div class="skeleton"><i></i><div><i></i><i></i></div></div>
+      <div class="skeleton"><i></i><div><i></i><i></i></div></div>
+      <div class="skeleton"><i></i><div><i></i><i></i></div></div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <details class="disclosure" id="clipboard-panel">
+    <summary>
+      <svg class="icon"><use href="#i-clipboard"/></svg>
+      Public clipboard <span class="count" id="clipboard-count">0</span>
+      <small class="only-pointer">visible to everyone</small>
+      <svg class="icon chev"><use href="#i-chevron"/></svg>
+    </summary>
+    <div class="disclosure-body">
+      <div class="empty hidden" id="clipboard-empty">
+        <svg class="icon icon-xl"><use href="#i-clipboard"/></svg>
+        <strong>Nothing pasted yet</strong>
+        <p>Paste text or an image anywhere on this page, or use the Paste button above.</p>
+      </div>
+      <div class="clips" id="clipboard-list"></div>
+      <p class="note">Anyone can read these. Only you can pin or delete what you posted.</p>
+    </div>
+  </details>
+</section>
+
+<section class="section">
+  <details class="disclosure" id="privacy-details">
+    <summary>
+      <svg class="icon"><use href="#i-shield"/></svg>
+      Privacy, safety and retention
+      <svg class="icon chev"><use href="#i-chevron"/></svg>
+    </summary>
+    <div class="disclosure-body">
+      <div class="policy">
+        <div>
+          <h3>Stored</h3>
+          <ul>
+            <li>The files, folders and clipboard items you upload</li>
+            <li>Your IP address, for rate limits and abuse handling</li>
+            <li>Upload time, size, name and type</li>
+            <li>A random browser ID in local storage, so you can delete your own uploads</li>
+          </ul>
+          <h3>Not stored</h3>
+          <ul>
+            <li>No accounts, names or email addresses</li>
+            <li>No analytics, ads or third-party scripts</li>
+            <li>Passwords are kept only as bcrypt hashes</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Safety</h3>
+          <ul>
+            <li>Every upload is scanned by ClamAV before it gets a link</li>
+            <li>HTML, SVG and scripts are shown as plain text, never run</li>
+            <li>Executables are download-only and marked as such</li>
+          </ul>
+          <h3>Retention</h3>
+          <ul>
+            <li>Files are removed at the expiry you choose (1 hour to 7 days), then purged 24 hours later</li>
+            <li>Single-download files are erased the moment they are downloaded</li>
+            <li>Audit logs are kept 90 days</li>
+          </ul>
+          {% if contact_email %}<h3>Abuse</h3><ul><li>Report content to <a href="mailto:{{ contact_email }}">{{ contact_email }}</a>; it is removed on valid reports.</li></ul>{% endif %}
+        </div>
+      </div>
+      <details style="margin-top:18px" id="deleted-section">
+        <summary class="muted" style="cursor:pointer;font-size:13.5px">Files recently rejected by the virus scanner</summary>
+        <div id="deleted-list" style="margin-top:10px"></div>
+      </details>
+    </div>
+  </details>
+</section>
 {% endblock %}
 
-{% block fab %}
-<button class="fab" id="fab-btn" title="Upload a file">⬆</button>
+{% block modals %}
+<div class="modal hidden" id="paste-modal" role="dialog" aria-modal="true" aria-labelledby="paste-title">
+  <div class="modal-box">
+    <div class="modal-head">
+      <span class="modal-title" id="paste-title">Paste to the public clipboard</span>
+      <button class="icon-btn" data-close type="button" aria-label="Close"><svg class="icon"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label class="field-label" for="paste-textarea">Text</label>
+        <textarea class="input" id="paste-textarea" rows="6" placeholder="Long-press here and choose Paste, or type…" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
+        <span class="field-help">Everyone can see clipboard items. Use a file upload with a password for anything private.</span>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-quiet" id="paste-pick-img" type="button" style="margin-right:auto"><svg class="icon"><use href="#i-image"/></svg>Image instead</button>
+        <button class="btn btn-primary" id="paste-save" type="button">Save text</button>
+      </div>
+    </div>
+  </div>
+</div>
+<input type="file" id="clip-image-input" accept="image/png,image/jpeg,image/gif,image/webp" hidden>
+
+<div class="modal hidden" id="pw-modal" role="dialog" aria-modal="true" aria-labelledby="pw-title">
+  <div class="modal-box">
+    <div class="modal-head">
+      <span class="modal-title" id="pw-title">This file is password protected</span>
+      <button class="icon-btn" data-close type="button" aria-label="Close"><svg class="icon"><use href="#i-x"/></svg></button>
+    </div>
+    <form class="modal-body" id="pw-form">
+      <div class="field">
+        <label class="field-label" for="pw-modal-input">Password</label>
+        <input class="input" type="password" id="pw-modal-input" autocomplete="off">
+        <span class="field-error" id="pw-error"></span>
+      </div>
+      <button class="btn btn-primary btn-lg" id="pw-submit" type="submit">Unlock</button>
+    </form>
+  </div>
+</div>
 {% endblock %}

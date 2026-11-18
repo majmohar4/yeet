@@ -1,5 +1,5 @@
 #!/bin/sh
-# Entrypoint: starts ClamAV (freshclam + clamd), then the FastAPI app.
+# Entrypoint: refreshes ClamAV definitions, then starts the FastAPI app.
 # Runs as the yeet user (uid 1000); clamd inherits the same user.
 set -e
 
@@ -10,38 +10,18 @@ freshclam --quiet 2>/dev/null || {
     echo "[yeet] WARNING: freshclam update skipped — will use cached definitions if present."
 }
 
-echo "[yeet] Starting clamd..."
-clamd &
-
-echo "[yeet] Waiting for clamd to accept connections..."
-i=0
-while [ "$i" -lt 60 ]; do
-    if python3 - <<'PYEOF' 2>/dev/null
-import socket, sys
-try:
-    s = socket.socket()
-    s.settimeout(1)
-    s.connect(('127.0.0.1', 3310))
-    s.sendall(b'zPING\0')
-    r = s.recv(10)
-    s.close()
-    sys.exit(0 if r == b'PONG\0' else 1)
-except Exception:
-    sys.exit(1)
-PYEOF
-    then
-        echo "[yeet] clamd ready."
-        break
-    fi
-    sleep 2
-    i=$((i + 1))
-done
+# clamd is started and stopped by the app (app/services/virus_scan.py).
 
 echo "[yeet] Starting FastAPI app..."
+# Only the reverse proxy may set X-Forwarded-*. With '*' uvicorn rewrites
+# request.client to the LEFT-MOST X-Forwarded-For entry — which the caller
+# writes — so any client could pick its own identity. The container publishes
+# on 127.0.0.1 only, so the peer is always the docker gateway.
+FORWARDED_ALLOW_IPS="${FORWARDED_ALLOW_IPS:-127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}"
 exec uvicorn app.main:app \
     --host 0.0.0.0 \
     --port 8000 \
     --proxy-headers \
-    --forwarded-allow-ips='*' \
+    --forwarded-allow-ips="$FORWARDED_ALLOW_IPS" \
     --access-log \
     --log-level info

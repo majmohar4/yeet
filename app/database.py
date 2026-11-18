@@ -11,6 +11,7 @@ async def get_db() -> aiosqlite.Connection:
         _db.row_factory = aiosqlite.Row
         await _db.execute("PRAGMA journal_mode=WAL")
         await _db.execute("PRAGMA foreign_keys=ON")
+        await _db.execute("PRAGMA busy_timeout=5000")
     return _db
 
 
@@ -107,6 +108,39 @@ async def init_db() -> None:
 
         CREATE INDEX IF NOT EXISTS idx_bundles_expires ON bundles(expires_at);
         CREATE INDEX IF NOT EXISTS idx_bundles_session ON bundles(uploader_session, created_at);
+
+        -- Resumable chunked uploads. Bytes land in PARTIAL_DIR/<id> (preallocated)
+        -- and only become a `files` row once every chunk arrived and the scan passed.
+        CREATE TABLE IF NOT EXISTS uploads (
+            id            TEXT PRIMARY KEY,
+            status        TEXT NOT NULL DEFAULT 'uploading',
+            orig_name     TEXT NOT NULL,
+            file_size     INTEGER NOT NULL,
+            chunk_size    INTEGER NOT NULL,
+            chunk_count   INTEGER NOT NULL,
+            password_hash TEXT,
+            max_downloads INTEGER,
+            burn_after_read INTEGER NOT NULL DEFAULT 0,
+            expiry_hours  INTEGER NOT NULL,
+            bypass_code   TEXT,
+            client_ip     TEXT,
+            user_agent    TEXT,
+            uploader_session TEXT,
+            bundle_id     TEXT,
+            bundle_path   TEXT,
+            result        TEXT,
+            created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS upload_chunks (
+            upload_id TEXT NOT NULL,
+            idx       INTEGER NOT NULL,
+            PRIMARY KEY (upload_id, idx)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_uploads_ip     ON uploads(client_ip, status);
+        CREATE INDEX IF NOT EXISTS idx_uploads_bundle ON uploads(bundle_id);
     """)
     # Idempotent migrations for existing databases
     for stmt in (
@@ -115,6 +149,9 @@ async def init_db() -> None:
         "ALTER TABLE files ADD COLUMN bundle_path TEXT",
         "ALTER TABLE files ADD COLUMN burn_after_read INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE files ADD COLUMN claimed_at TEXT",
+        # Bundles assembled through the chunked API stay hidden until complete.
+        "ALTER TABLE bundles ADD COLUMN pending INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE bundles ADD COLUMN upload_token TEXT",
     ):
         try:
             await db.execute(stmt)

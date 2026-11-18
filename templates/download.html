@@ -1,51 +1,84 @@
 {% extends "base.html" %}
-{% block title %}{{ file.orig_name }} — Yeet{% endblock %}
+{% block title %}{{ file.orig_name }} — yeet{% endblock %}
+
+{% set kind = preview_kind %}
+{% set mt = file.mime_type or '' %}
+{% if mt.startswith('image/') %}{% set ico = 'i-image' %}
+{% elif mt.startswith('video/') %}{% set ico = 'i-video' %}
+{% elif mt.startswith('audio/') %}{% set ico = 'i-audio' %}
+{% elif mt == 'application/pdf' or mt.startswith('text/') %}{% set ico = 'i-doc' %}
+{% else %}{% set ico = 'i-file' %}{% endif %}
 
 {% block content %}
-<div class="dl-page">
+<div class="page">
+  <div class="share{% if not kind %} no-preview{% endif %}" id="share"
+       data-id="{{ file.id }}" data-size="{{ file.file_size }}" data-kind="{{ kind or '' }}"
+       data-name="{{ file.orig_name }}" data-locked="{{ '1' if needs_password else '0' }}"
+       data-burn="{{ '1' if file.burn_after_read else '0' }}">
 
-  <div class="dl-card">
-    <div class="dl-card-icon">
-      {% if needs_password %}🔒
-      {% elif file.mime_type and file.mime_type.startswith('image/') %}🖼️
-      {% elif file.mime_type == 'application/pdf' %}📄
-      {% elif file.mime_type and file.mime_type.startswith('video/') %}🎬
-      {% elif file.mime_type and file.mime_type.startswith('audio/') %}🎵
-      {% else %}📄
+    {% if kind %}
+    <div class="share-stage" id="stage">
+      {% if needs_password %}
+        <div class="preview-note"><svg class="icon icon-xl"><use href="#i-lock"/></svg><span>Unlock to preview</span></div>
+      {% elif kind == 'image' %}
+        <img src="/raw/{{ file.id }}" alt="{{ file.orig_name }}">
+      {% elif kind == 'video' %}
+        <video src="/raw/{{ file.id }}" controls playsinline preload="metadata"></video>
+      {% elif kind == 'audio' %}
+        <audio src="/raw/{{ file.id }}" controls preload="metadata"></audio>
+      {% elif kind == 'pdf' %}
+        <div class="preview-note"><svg class="icon icon-xl"><use href="#i-doc"/></svg>
+          <a class="btn" href="/raw/{{ file.id }}" target="_blank" rel="noopener"><svg class="icon"><use href="#i-external"/></svg>Open PDF in a new tab</a></div>
+      {% elif kind == 'text' %}
+        <pre id="text-preview" data-src="/raw/{{ file.id }}">Loading…</pre>
       {% endif %}
     </div>
-    <div class="dl-card-name">{{ file.orig_name }}</div>
-    <div class="dl-card-meta">
-      {{ (file.file_size / 1048576) | round(2) }} MB &middot; {{ file.mime_type or 'unknown type' }}
-    </div>
-    <div class="dl-card-meta">
-      Expires {{ file.expires_at[:10] }}
-      {% if file.max_downloads %}
-        &middot; {{ file.download_count }} / {{ file.max_downloads }} downloads used
-      {% endif %}
-    </div>
-  </div>
-
-  {% if needs_password %}
-
-    {% if error %}
-    <div class="dl-error">{{ error }}</div>
     {% endif %}
 
-    <form method="POST" class="dl-form">
-      <label class="dl-label" for="dl-password">Password required to download this file</label>
-      <input class="form-input" type="password" id="dl-password" name="password" autofocus placeholder="Enter password">
-      <button type="submit" class="upload-submit" style="align-self:flex-start">Unlock &amp; download</button>
-    </form>
+    <section class="share-card">
+      <span class="share-icon"><svg class="icon icon-lg"><use href="#{{ 'i-lock' if needs_password else ico }}"/></svg></span>
+      <h1 class="share-name">{{ file.orig_name }}</h1>
 
-  {% else %}
+      <dl class="facts">
+        <dt>Size</dt><dd>{{ file.file_size|filesize }}</dd>
+        <dt>Expires</dt><dd data-expires="{{ file.expires_at }}">{{ file.expires_at[:16]|replace('T', ' ') }} UTC</dd>
+        {% if downloads_left is not none %}<dt>Downloads left</dt><dd>{{ downloads_left }}</dd>{% endif %}
+        {% if file.scan_status == 'clean' %}<dt>Virus scan</dt><dd>clean</dd>{% endif %}
+      </dl>
 
-    <form method="POST" class="dl-form">
-      <input type="hidden" name="password" value="">
-      <button type="submit" class="upload-submit" style="align-self:flex-start">⬇ Download file</button>
-    </form>
+      {% if file.burn_after_read %}
+      <div class="callout warn"><svg class="icon"><use href="#i-flame"/></svg>
+        <span>Single download. The file is erased from the server as soon as you download it — save it somewhere.</span></div>
+      {% endif %}
+      {% if dangerous %}
+      <div class="callout danger"><svg class="icon"><use href="#i-alert"/></svg>
+        <span>This is a program or script. Only run it if you trust whoever sent it.</span></div>
+      {% endif %}
 
-  {% endif %}
+      {% if needs_password %}
+      <form method="POST" action="/f/{{ file.id }}" class="field" id="unlock-form">
+        <label class="field-label" for="dl-password">Password</label>
+        <input class="input" type="password" id="dl-password" name="password" autocomplete="off" autofocus required>
+        <span class="field-error" id="unlock-error">{{ error or '' }}</span>
+        <button class="btn btn-primary btn-lg btn-block" type="submit"><svg class="icon"><use href="#i-lock"/></svg>Unlock</button>
+      </form>
+      {% endif %}
 
+      <div id="dl-actions" class="field{% if needs_password %} hidden{% endif %}">
+        <a class="btn btn-primary btn-lg btn-block" id="dl-btn" href="/f/{{ file.id }}?dl=1" download>
+          <svg class="icon"><use href="#i-download"/></svg>Download
+        </a>
+        <div class="dl-progress hidden" id="dl-progress">
+          <div class="bar"><i id="dl-fill"></i></div>
+          <span class="job-stat" id="dl-stat"></span>
+        </div>
+        {% if not file.burn_after_read %}
+        <button class="btn btn-block" type="button" id="share-link"><svg class="icon"><use href="#i-link"/></svg>Copy link</button>
+        {% endif %}
+      </div>
+
+      <p class="note">Shared with <a href="/">yeet</a>. Files are scanned for viruses, but only open what you expected to receive.</p>
+    </section>
+  </div>
 </div>
 {% endblock %}

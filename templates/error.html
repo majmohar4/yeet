@@ -1,9 +1,14 @@
 {% extends "base.html" %}
-{% block title %}{{ status }} — Yeet{% endblock %}
+{% block title %}{{ status }} — yeet{% endblock %}
 {% block content %}
-<div class="error-page">
-  <div class="error-code">{{ status }}</div>
-  <div class="error-message">{{ message }}</div>
-  <a href="/" class="error-back">← Back to Yeet</a>
+<div class="page error-page">
+  <span class="error-code">ERROR {{ status }}</span>
+  <h1>{{ message }}</h1>
+  <p class="muted" style="margin:0">
+    {% if status == 404 or status == 410 %}Links on yeet stop working when a file expires, hits its download limit, or is deleted by its uploader.
+    {% elif status == 429 %}You've hit a rate limit. Wait a little and try again.
+    {% else %}Something went wrong on our side. Try again in a moment.{% endif %}
+  </p>
+  <div><a href="/" class="btn"><svg class="icon"><use href="#i-upload"/></svg>Share a file</a></div>
 </div>
 {% endblock %}

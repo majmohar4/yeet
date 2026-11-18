@@ -21,15 +21,18 @@ For a hands-on walkthrough of every feature see **[USAGE.md](USAGE.md)**, the fu
 **Sharing**
 - Single files (`/f/<id>`), folders / multi-file bundles (`/b/<id>`), and quick text/image clipboard items (`/c/<id>`)
 - Files expire automatically (default: 24 hours, configurable per upload — 1 h / 24 h / 7 d)
-- Optional **🔥 burn after read** — file is wiped from disk the moment it's served (atomic, race-free)
+- Optional **single download** (burn after read) — wiped the moment it's downloaded (atomic, race-free). Chat-app link previews can't trigger it
+- **Big files behind Cloudflare** — uploads go in 16 MB chunks (well under Cloudflare's 100 MB request cap), several in parallel, each retried on its own; an interrupted upload resumes when the same file is picked again
+- **Resumable downloads** — HTTP Range on every file; browsers resume, Chromium fetches big files in 64 MB pieces, the CLI resumes with `yeet download`
+- Shared links open a landing page with a preview (image, video, audio, text) for people, and serve raw bytes to scripts (`curl`, `wget`, `?dl=1`)
 - Optional password protection (bcrypt) and per-file download limit
 - Public clipboard panel — recent text/image pastes from everyone; pin/delete remain owner-only
 - Folder uploads scan each member individually, expose a single share URL, and offer a streaming `.zip` download
 
 **Mobile + tablet**
-- Quick **📋 Paste**, **🖼 Photo**, **📁 Folder** buttons in the drop zone (no Ctrl-V required)
-- Camera capture and clipboard-API integration; manual paste textarea fallback
-- Fully responsive layout, ≥44 px tap targets, `pointer: coarse` adaptations
+- **Files**, **Photos & videos** (opens the gallery, HEIC and large videos included), **Folder** and **Paste** buttons — no Ctrl-V required
+- Native share sheet for finished links, screen kept awake during uploads, bottom-sheet dialogs
+- Video previews play on iOS (Range support), responsive down to 320 px
 
 **Security**
 - ClamAV virus scanning on every upload — infected files rejected and logged
@@ -41,18 +44,18 @@ For a hands-on walkthrough of every feature see **[USAGE.md](USAGE.md)**, the fu
 
 **Limits**
 - Byte-based rate limiting — 1 GB/day per IP, scales up with file size limit
-- Concurrent upload limit (max 2 simultaneous per IP)
-- Storage cap with 80% warning and 90% block
+- Concurrent upload limit (max 2 multipart / 6 chunked uploads in flight per IP)
+- Storage cap with 80% warning and 90% block; disk space is reserved before an upload starts, so a full disk gives a clear 507 instead of a broken upload
 - **Bypass codes** — single-use codes that skip all upload limits (`yeet generate-code`)
 
 **Files / file types**
 - ~1000 explicitly supported extensions across docs, media, RAW, scientific, GIS, 3D/CAD, fonts, e-books, archives, source code (see [FORMATS.md](FORMATS.md))
 - Permissive fallback — any extension shape passes (`^\.[a-z0-9_+-]{1,12}$`)
-- ⚠ executable badge on `.exe`/`.dll`/`.deb`/`.dmg`/`.sh`/etc. so downloaders know what they're getting
+- Executable badge on `.exe`/`.dll`/`.deb`/`.dmg`/`.sh`/etc. so downloaders know what they're getting
 
 **Daily-driver UX**
-- Drag-and-drop with progress bar
-- Search and filter your recent uploads on the main page
+- Drag-and-drop anywhere on the page, per-file progress with speed and time left, retry and cancel
+- Your uploads vs everyone's, search and sort
 - Collapsed "recently deleted" section shows virus scanner activity
 - `POST /raw` for `curl -F f=@thing.txt $YEET/raw` — returns the URL on stdout
 - No JavaScript required to download
@@ -255,7 +258,15 @@ All settings are environment variables. Copy `.env.example` to `.env` and adjust
 | `STORAGE_LIMIT` | `10737418240` | Total disk limit in bytes (10GB) |
 | `FILE_EXPIRY_HOURS` | `24` | Hours until files expire |
 | `CLAMAV_ENABLED` | `true` | Enable ClamAV virus scanning |
+| `CLAMAV_IDLE_MINUTES` | `15` | Stop clamd (~1 GB RAM) after this many idle minutes; it restarts on the next upload (~30–50 s). `0` = always running |
+| `CLAMAV_UPDATE_HOURS` | `6` | Refresh virus definitions this often; `0` = only at container start |
 | `RATE_LIMIT_DOWNLOADS` | `100` | Max downloads per IP per hour |
+| `YEET_DATA_DIR` | `./data` | Host folder mounted at `/data` (read by docker compose) |
+| `CONTACT_EMAIL` | — | Abuse contact shown in the footer and error messages |
+| `CHUNK_SIZE` | `16777216` | Upload chunk size in bytes — keep under your proxy's request limit |
+| `MIN_FREE_DISK_MB` | `2048` | Refuse uploads that would leave less free disk |
+| `MAX_ACTIVE_UPLOADS` | `6` | Unfinished chunked uploads per IP |
+| `PARTIAL_TTL_HOURS` | `6` | Abandoned partial uploads are deleted after this |
 
 These values can also be changed at runtime via the CLI (stored in `/data/config.json`):
 
@@ -303,9 +314,9 @@ curl -u admin:pass -X POST https://yeet.example.com/admin/cleanup
 
 ## How it works
 
-1. File is uploaded and read into memory
-2. ClamAV scans the bytes (if enabled)
-3. File is saved to `/data/uploads/<uuid>` with no extension on disk — nothing yeet stores can be executed
+1. The browser or CLI reserves space (`POST /api/uploads`), sends the file in chunks (`PUT …/chunks/<n>`) and asks to finish (`POST …/complete`). Multipart `POST /upload` and `POST /raw` still work for curl. Nothing is held in memory — bytes go straight to `/data/partial/`
+2. ClamAV scans the file from disk (if enabled); the client polls while it runs, so slow scans never hit a proxy timeout
+3. File is moved to `/data/uploads/<uuid>` with no extension on disk — nothing yeet stores can be executed
 4. Metadata (filename, hash, expiry, password hash, dangerous/burn flags) is stored in SQLite
 5. A link is returned — `/f/<32-char-hex-id>` for files, `/b/<id>` for folder bundles, `/c/<id>` for clipboard items
 6. Background task checks every 15 minutes: expired files move to `/data/archive/`, files archived more than 24 h ago are permanently deleted
@@ -314,6 +325,10 @@ curl -u admin:pass -X POST https://yeet.example.com/admin/cleanup
 ---
 
 ## Troubleshooting
+
+**Uploads fail with "out of disk space" although `df` shows free space** — check for pooled filesystems: mergerfs with `minfreespace` (or a quota) refuses new files on branches below the threshold. Point `YEET_DATA_DIR` at a plain disk.
+
+**Large uploads fail behind a proxy** — the browser and `yeet upload` already send 16 MB chunks. If your proxy caps requests lower, set `CHUNK_SIZE` below that limit.
 
 **ClamAV is slow on first run** — it downloads ~300MB of virus definitions. This is normal. Subsequent starts use the cached database.
 
