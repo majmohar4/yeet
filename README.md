@@ -43,6 +43,7 @@ For a hands-on walkthrough of every feature see **[USAGE.md](USAGE.md)**, the fu
 - Audit log for every upload, download, deletion, virus hit, and admin action
 
 **Limits**
+- Three tiers: **standard** (1 GB per file), **unlocked** (secret password entered in the UI → 10 GB per file, 30-day signed cookie), **suspicious** (200 MB for IPs with recent malware uploads, honeypot hits or password guessing)
 - Byte-based rate limiting — 1 GB/day per IP, scales up with file size limit
 - Concurrent upload limit (max 2 multipart / 6 chunked uploads in flight per IP)
 - Storage cap with 80% warning and 90% block; disk space is reserved before an upload starts, so a full disk gives a clear 507 instead of a broken upload
@@ -254,13 +255,17 @@ All settings are environment variables. Copy `.env.example` to `.env` and adjust
 |---|---|---|
 | `SECRET_KEY` | **required** | Session signing key (min 32 chars) |
 | `ADMIN_PASSWORD` | — | Admin panel password (leave empty to disable) |
-| `MAX_FILE_SIZE` | `104857600` | Max upload size in bytes (100MB) |
+| `MAX_FILE_SIZE` | `1073741824` | Per-file limit for standard visitors (1 GB) |
 | `STORAGE_LIMIT` | `10737418240` | Total disk limit in bytes (10GB) |
 | `FILE_EXPIRY_HOURS` | `24` | Hours until files expire |
 | `CLAMAV_ENABLED` | `true` | Enable ClamAV virus scanning |
 | `CLAMAV_IDLE_MINUTES` | `15` | Stop clamd (~1 GB RAM) after this many idle minutes; it restarts on the next upload (~30–50 s). `0` = always running |
 | `CLAMAV_UPDATE_HOURS` | `6` | Refresh virus definitions this often; `0` = only at container start |
 | `RATE_LIMIT_DOWNLOADS` | `100` | Max downloads per IP per hour |
+| `UNLOCK_PASSWORD` | — | Secret that unlocks bigger limits in the UI (≥ 12 chars; empty disables) |
+| `TRUSTED_MAX_FILE_SIZE` / `TRUSTED_DAILY_LIMIT` | `10 GB` / `50 GB` | Limits for unlocked browsers |
+| `SUSPICIOUS_MAX_FILE_SIZE` / `SUSPICIOUS_DAILY_LIMIT` | `200 MB` / `200 MB` | Limits for IPs with recent abuse signals |
+| `SCAN_MEDIA` | `light` | `light`: verified photos/videos skip ClamAV; `full`: scan everything |
 | `YEET_DATA_DIR` | `./data` | Host folder mounted at `/data` (read by docker compose) |
 | `CONTACT_EMAIL` | — | Abuse contact shown in the footer and error messages |
 | `CHUNK_SIZE` | `16777216` | Upload chunk size in bytes — keep under your proxy's request limit |

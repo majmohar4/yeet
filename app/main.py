@@ -15,7 +15,7 @@ from app.config import settings
 from app.database import close_db, init_db
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.security import SecurityHeadersMiddleware
-from app.routes import admin, bundles, chunked, clipboard, download, files, upload
+from app.routes import admin, bundles, chunked, clipboard, download, files, limits, upload
 from app.services import virus_scan
 from app.services.cleanup import cleanup_loop
 
@@ -105,6 +105,7 @@ app.include_router(admin.router)
 app.include_router(clipboard.router)
 app.include_router(bundles.router)
 app.include_router(chunked.router)
+app.include_router(limits.router)
 
 
 @app.get("/c/{item_id}/raw")

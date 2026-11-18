@@ -152,6 +152,8 @@ async def init_db() -> None:
         # Bundles assembled through the chunked API stay hidden until complete.
         "ALTER TABLE bundles ADD COLUMN pending INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE bundles ADD COLUMN upload_token TEXT",
+        "ALTER TABLE uploads ADD COLUMN tier TEXT",
+        "CREATE INDEX IF NOT EXISTS idx_audit_ip ON audit_log(client_ip, ts)",
     ):
         try:
             await db.execute(stmt)

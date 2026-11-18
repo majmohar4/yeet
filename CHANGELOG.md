@@ -6,6 +6,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), version
 
 ---
 
+## [1.3.0] — 2026-11-18
+
+### Added
+- Unlock password (`UNLOCK_PASSWORD`): entered in the UI, gives the browser 10 GB per file and 50 GB/day for 30 days via a signed `HttpOnly`/`Secure`/`SameSite=Strict` cookie. Wrong guesses are delayed, locked out per IP and globally, and audited.
+- Visitor tiers: standard 1 GB per file; IPs with recent abuse signals drop to 200 MB.
+- Uploads survive a reload: the page lists this browser's unfinished, scanning and recently finished uploads (`GET /api/uploads`, scoped to the session) and resumes or follows them.
+- Live scan progress (starting scanner, % scanned, finishing).
+- Photos and videos whose bytes match a real image/video format skip ClamAV (`SCAN_MEDIA=light`).
+- Livelier design: ambient accent glow, drop-zone spotlight, animated details.
+
+### Changed
+- Default per-file limit is now 1 GB.
+- Leaving the page is only blocked while bytes are still uploading, not while the server scans.
+
+### Fixed
+- Folder uploads compared the folder's total size with the per-file limit.
+
 ## [1.2.0] — 2026-11-18
 
 ### Added

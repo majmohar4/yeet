@@ -71,6 +71,9 @@ I aim to acknowledge reports within 48 hours and provide a fix or mitigation tim
 | Concurrent uploads | In-memory semaphore, 2 multipart uploads / IP; at most `MAX_ACTIVE_UPLOADS` unfinished chunked uploads / IP |
 | Chunked uploads | Unguessable 128-bit upload IDs; every chunk length is checked against the declared size; folder members need the folder's secret `upload_token`; abandoned partials are purged |
 | Disk exhaustion | Full upload size reserved with `posix_fallocate` before accepting; `MIN_FREE_DISK_MB` kept spare; ENOSPC returns 507 |
+| Unlock password | Constant-time compare; 1 s delay per wrong guess; per-IP lockout (5 / 15 min) and global lockout (30 / h); failures audited. Grants a 30-day HMAC-signed cookie (`HttpOnly`, `Secure`, `SameSite=Strict`) whose MAC covers a hash of the password, so changing it revokes all unlocks |
+| Abuse tiers | IPs with malware uploads, honeypot hits, ≥ 3 wrong unlock or admin passwords, or ≥ 10 wrong download passwords in 24 h get 200 MB limits |
+| Media fast path | Image/video extensions skip ClamAV only when the file's leading bytes match a known image/video container; anything else (e.g. a renamed executable) is fully scanned. Media is always served with `nosniff` and its real type |
 | Burn-after-read | Atomic `UPDATE … WHERE claimed_at IS NULL`; only one downloader can win. Link-preview bots get the landing page and Range requests are refused, so neither can spend the view |
 | Audit logging | All uploads, downloads, and admin actions logged |
 | Non-root container | App runs as UID 1000 inside Docker |

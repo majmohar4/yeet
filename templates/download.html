@@ -43,7 +43,8 @@
         <dt>Size</dt><dd>{{ file.file_size|filesize }}</dd>
         <dt>Expires</dt><dd data-expires="{{ file.expires_at }}">{{ file.expires_at[:16]|replace('T', ' ') }} UTC</dd>
         {% if downloads_left is not none %}<dt>Downloads left</dt><dd>{{ downloads_left }}</dd>{% endif %}
-        {% if file.scan_status == 'clean' %}<dt>Virus scan</dt><dd>clean</dd>{% endif %}
+        {% if file.scan_status == 'clean' %}<dt>Virus scan</dt><dd>clean</dd>
+        {% elif file.scan_status == 'media' %}<dt>File check</dt><dd>verified media</dd>{% endif %}
       </dl>
 
       {% if file.burn_after_read %}

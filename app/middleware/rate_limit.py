@@ -117,7 +117,7 @@ async def record_bandwidth(ip: str, bytes_used: int) -> None:
     await db.commit()
 
 
-async def check_upload_bandwidth(ip: str, upload_size: int) -> dict:
+async def check_upload_bandwidth(ip: str, upload_size: int, daily_limit: int | None = None) -> dict:
     """
     Returns dict with:
       allowed: bool
@@ -127,7 +127,8 @@ async def check_upload_bandwidth(ip: str, upload_size: int) -> dict:
       remaining: int (bytes)
       reset_in_hours: float
     """
-    daily_limit = get_daily_upload_limit()
+    if daily_limit is None:
+        daily_limit = get_daily_upload_limit()
     used = await get_used_bandwidth(ip)
     pct = (used / daily_limit * 100) if daily_limit else 0
     remaining = max(0, daily_limit - used)

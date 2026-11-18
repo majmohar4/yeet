@@ -46,7 +46,12 @@ def _db():
 
 @pytest.fixture(scope="session")
 def client():
-    with httpx.Client(base_url=BASE_URL, follow_redirects=True, timeout=30) as c:
+    # A fresh client IP per run: abuse-signal tests (wrong passwords, EICAR) would
+    # otherwise mark 127.0.0.1 "suspicious" and shrink limits for later runs.
+    import random
+    ip = f"10.{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(1, 254)}"
+    headers = {"X-Forwarded-For": ip, "CF-Connecting-IP": ip}
+    with httpx.Client(base_url=BASE_URL, follow_redirects=True, timeout=30, headers=headers) as c:
         yield c
 
 
@@ -133,8 +138,9 @@ def test_upload_scan_status_in_response(client):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def test_upload_rejects_over_limit(client):
-    big = b"0" * (101 * 1024 * 1024)
-    assert upload(client, content=big).status_code == 413
+    limit = client.get("/api/limits").json()["max_file_bytes"]
+    r = client.post("/api/uploads", json={"name": "big.bin", "size": limit + 1})
+    assert r.status_code == 413
 
 def test_upload_allows_at_limit(client):
     r = upload(client, content=b"a" * 1024)
@@ -631,10 +637,14 @@ def test_homepage_storage_pct_field(client):
     assert r.status_code == 200
 
 def test_upload_size_limit_enforced_strictly(client):
-    # 1 byte over limit → 413
-    content_length = 101 * 1024 * 1024
-    r = upload(client, content=b"0" * content_length)
-    assert r.status_code == 413
+    # Exactly at the limit is allowed to start; 1 byte over is refused.
+    limit = client.get("/api/limits").json()["max_file_bytes"]
+    at = client.post("/api/uploads", json={"name": "edge.bin", "size": limit})
+    assert at.status_code in (201, 429, 507)  # 429: daily volume already used by the suite
+    if at.status_code == 201:
+        client.delete(f"/api/uploads/{at.json()['id']}")
+    over = client.post("/api/uploads", json={"name": "edge.bin", "size": limit + 1})
+    assert over.status_code == 413
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1004,3 +1014,33 @@ def test_chunked_folder_hidden_until_published(client):
     r = client.post(f"/api/bundles/{b['id']}/complete", json={"bundle_token": b["token"]})
     assert r.status_code == 201 and r.json()["file_count"] == 1
     assert client.get(f"/b/{b['id']}").status_code == 200
+
+
+# ── Visitor tiers & unlock (1.3.0) ───────────────────────────────────────────
+
+def test_limits_endpoint_shape(client):
+    d = client.get("/api/limits").json()
+    assert {"tier", "max_file_bytes", "daily_limit", "unlock_available"} <= d.keys()
+
+
+def test_unlock_wrong_password_rejected_without_cookie(client):
+    r = httpx.post(f"{BASE_URL}/api/unlock", json={"password": "definitely-wrong-guess"},
+                   headers={"X-Forwarded-For": "10.250.0.1"}, timeout=30)
+    assert r.status_code in (403, 404, 429)
+    assert "yeet_unlock" not in r.headers.get("set-cookie", "")
+
+
+def test_forged_unlock_cookie_ignored(client):
+    r = httpx.get(f"{BASE_URL}/api/limits", cookies={"yeet_unlock": "9999999999.abcd.deadbeef"},
+                  timeout=30)
+    assert r.json()["tier"] != "trusted"
+
+
+def test_my_uploads_scoped_to_session(client):
+    r = client.post("/api/uploads", json={"name": "s.bin", "size": 10, "session_id": "scope-a"})
+    uid = r.json()["id"]
+    mine = client.get("/api/uploads", headers={"X-Session-ID": "scope-a"}).json()["uploads"]
+    assert any(u["id"] == uid for u in mine)
+    other = client.get("/api/uploads", headers={"X-Session-ID": "scope-b"}).json()["uploads"]
+    assert all(u["id"] != uid for u in other)
+    client.delete(f"/api/uploads/{uid}")

@@ -3,15 +3,16 @@
 
 {% block content %}
 <section class="intro">
-  <h1>Send a file, get a link.</h1>
-  <p>Up to {{ max_file_bytes|filesize }} per file, virus-scanned, gone after the time you choose.</p>
+  <p class="eyebrow"><span class="pulse-dot" aria-hidden="true"></span>Private, temporary, no account</p>
+  <h1>Send a file,<br class="br-sm"> get a <span class="ink">link</span>.</h1>
+  <p>Up to <span id="intro-limit">{{ max_file_bytes|filesize }}</span> per file, checked for viruses, gone after the time you choose.</p>
 </section>
 
 <section class="composer" aria-label="Upload">
   <div class="dropzone{% if storage_blocked %} disabled{% endif %}" id="drop-zone" tabindex="0" role="button"
        aria-label="Choose files to upload, or drop them here">
     <div class="dz-head">
-      <span class="dz-icon"><svg class="icon"><use href="#i-upload"/></svg></span>
+      <span class="dz-icon"><svg class="icon"><use href="#i-upload"/></svg><i class="dz-ring" aria-hidden="true"></i></span>
       <div>
         <div class="dz-title"><span class="only-pointer">Drop files or a folder here, or <span class="accent">browse</span></span><span class="only-touch">Tap to choose files</span></div>
         <div class="dz-sub"><span class="only-pointer">You can also paste with <kbd>Ctrl</kbd>+<kbd>V</kbd>. </span>Large files are sent in pieces and resume after a dropped connection.</div>
@@ -52,8 +53,19 @@
       <span class="switch-text">Single download<small>Deleted right after the first download. Not for folders.</small></span>
     </label>
     <div class="limits">
-      <div class="limit"><b>{{ max_file_bytes|filesize }}</b><span>per file</span></div>
-      <div class="limit"><b>ClamAV</b><span>scans every upload</span></div>
+      <div class="limit"><b id="limit-file">{{ max_file_bytes|filesize }}</b><span>per file</span></div>
+      <div class="limit"><b><span class="live-dot" aria-hidden="true"></span>ClamAV</b><span>virus scanning on</span></div>
+    </div>
+    <div class="tier-box" id="tier-box" data-tier="{{ tier }}" data-unlock="{{ '1' if unlock_available else '0' }}">
+      {% if tier == 'trusted' %}
+        <span class="tier-badge"><svg class="icon"><use href="#i-key"/></svg>Unlocked</span>
+        <span class="tier-text">Bigger uploads are on for this browser.</span>
+        <button class="btn btn-quiet btn-sm" type="button" id="lock-btn">Lock</button>
+      {% elif tier == 'suspicious' %}
+        <span class="tier-text warn"><svg class="icon"><use href="#i-alert"/></svg>Uploads from your connection are limited for now because of recent unusual activity.</span>
+      {% elif unlock_available %}
+        <button class="link-btn" type="button" id="unlock-open"><svg class="icon"><use href="#i-key"/></svg>Have an unlock password?</button>
+      {% endif %}
     </div>
   </aside>
 </section>
@@ -192,6 +204,24 @@
   </div>
 </div>
 <input type="file" id="clip-image-input" accept="image/png,image/jpeg,image/gif,image/webp" hidden>
+
+<div class="modal hidden" id="unlock-modal" role="dialog" aria-modal="true" aria-labelledby="unlock-title">
+  <div class="modal-box">
+    <div class="modal-head">
+      <span class="modal-title" id="unlock-title">Unlock bigger uploads</span>
+      <button class="icon-btn" data-close type="button" aria-label="Close"><svg class="icon"><use href="#i-x"/></svg></button>
+    </div>
+    <form class="modal-body" id="unlock-form">
+      <div class="field">
+        <label class="field-label" for="unlock-input">Unlock password</label>
+        <input class="input" type="password" id="unlock-input" autocomplete="current-password" required>
+        <span class="field-help">Stays unlocked in this browser for 30 days. Wrong guesses are rate-limited.</span>
+        <span class="field-error" id="unlock-error"></span>
+      </div>
+      <button class="btn btn-primary btn-lg" type="submit" id="unlock-submit">Unlock</button>
+    </form>
+  </div>
+</div>
 
 <div class="modal hidden" id="pw-modal" role="dialog" aria-modal="true" aria-labelledby="pw-title">
   <div class="modal-box">

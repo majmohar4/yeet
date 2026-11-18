@@ -29,7 +29,7 @@ from app.middleware.rate_limit import (
 )
 from app.routes.files import annotate_ownership, owns
 from app.routes.upload import ALLOWED_EXTENSIONS, _check_extension
-from app.services import concurrent, ingest, storage
+from app.services import concurrent, ingest, storage, tiers
 from app.services.config_manager import (
     get_file_expiry_hours,
     get_max_file_size,
@@ -92,7 +92,8 @@ async def upload_bundle(
         )
 
     bypassed = await peek_bypass_code(bypass_code)
-    max_file = get_max_file_size()
+    tier = await tiers.tier_for(request, ip)
+    max_file = tier.max_file
     storage_limit = get_storage_limit()
 
     if not bypassed:
@@ -108,7 +109,7 @@ async def upload_bundle(
         return await _do_bundle_upload(
             request, files, paths, name, password, ip, ua,
             max_file, storage_limit, bypassed, session_id, expiry_hours,
-            bypass_code,
+            bypass_code, tier,
         )
     finally:
         await concurrent.release(ip)
@@ -117,7 +118,7 @@ async def upload_bundle(
 async def _do_bundle_upload(
     request, files, paths_csv, bundle_name, password, ip, ua,
     max_file, storage_limit, bypassed, session_id, expiry_hours,
-    bypass_code="",
+    bypass_code="", tier=None,
 ):
     raw_paths = [p for p in (paths_csv or "").split("\n") if p]
     if raw_paths and len(raw_paths) != len(files):
@@ -142,7 +143,7 @@ async def _do_bundle_upload(
                 return result
             spooled.append((result, size))
         total = sum(size for _, size in spooled)
-        rejected = await ingest.precheck(total, ip, bypassed)
+        rejected = await ingest.precheck(total, ip, bypassed, tier, per_file=False)
         if rejected is not None:
             return rejected
 
@@ -176,6 +177,7 @@ async def _do_bundle_upload(
                 orig_name=f.filename or rel.split("/")[-1], ip=ip, ua=ua, base_url=base,
                 password_hash=pw_hash, session=session, bypassed=bypassed,
                 bundle_id=bundle_id, bundle_path=rel, expires_at=expires_at,
+                tier=tier.name, daily_limit=tier.daily,
             ))
             if code != 201:
                 await _discard_bundle(bundle_id)

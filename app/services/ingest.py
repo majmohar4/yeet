@@ -7,6 +7,7 @@ into a temp file on disk, then calls `finalize()`. That keeps scanning,
 hashing, accounting and the response shape identical everywhere, and means no
 path ever holds a whole upload in memory.
 """
+import asyncio
 import logging
 import mimetypes
 import uuid
@@ -23,12 +24,12 @@ from app.middleware.rate_limit import (
     consume_bypass_code,
     record_bandwidth,
 )
-from app.services import storage, virus_scan
+from app.services import media, storage, virus_scan
 from app.services.config_manager import (
     get_file_expiry_hours,
-    get_max_file_size,
     get_storage_limit,
 )
+from app.services.tiers import Tier
 from app.services.extensions import (
     _check_extension,
     is_dangerous_ext,
@@ -38,6 +39,7 @@ from app.services.extensions import (
 logger = logging.getLogger("yeet.ingest")
 
 MAX_EXPIRY_HOURS = 168
+CLAMAV_STREAM_MAX = 4000 * 1_048_576  # clamd StreamMaxLength (Dockerfile)
 
 
 @dataclass
@@ -56,6 +58,8 @@ class UploadMeta:
     bundle_id: str | None = None
     bundle_path: str | None = None
     expires_at: str | None = None  # bundle members share the envelope's expiry
+    tier: str = "standard"
+    daily_limit: int | None = None
 
 
 # ── Form parsing helpers (validate at the boundary) ──────────────────────────
@@ -102,15 +106,24 @@ def disk_full_response() -> JSONResponse:
     return error(disk_full_message(), 507)
 
 
-async def precheck(size: int, ip: str, bypassed: bool) -> JSONResponse | None:
-    """Everything that can be decided from the declared size alone."""
-    max_file = get_max_file_size()
+async def precheck(
+    size: int, ip: str, bypassed: bool, tier: Tier, per_file: bool = True
+) -> JSONResponse | None:
+    """Everything that can be decided from the declared size alone.
+
+    `per_file=False` for a whole folder: its total may exceed the per-file
+    limit; each member is checked on its own when it is uploaded.
+    """
+    max_file = tier.max_file
     if size < 0:
         return error("Invalid file size.", 400)
-    if not bypassed and size > max_file:
-        return error(f"File too large. Maximum is {_fmt_mb(max_file)}.", 413)
+    if per_file and not bypassed and size > max_file:
+        hint = ""
+        if tier.name == "suspicious":
+            hint = " Uploads from your connection are temporarily limited."
+        return error(f"File too large. Maximum is {_fmt_mb(max_file)}.{hint}", 413)
 
-    if not bypassed:
+    if not bypassed and not tier.trusted:
         limit = get_storage_limit()
         if storage.get_total_storage() + size >= limit * 0.9:
             contact = f" Contact {settings.CONTACT_EMAIL}." if settings.CONTACT_EMAIL else ""
@@ -120,7 +133,7 @@ async def precheck(size: int, ip: str, bypassed: bool) -> JSONResponse | None:
         return disk_full_response()
 
     if not bypassed:
-        bw = await check_upload_bandwidth(ip, size)
+        bw = await check_upload_bandwidth(ip, size, tier.daily)
         if not bw["allowed"]:
             hrs = bw["reset_in_hours"]
             return error(
@@ -141,13 +154,14 @@ def _fmt_mb(n: int) -> str:
 
 # ── Finalize ─────────────────────────────────────────────────────────────────
 
-async def finalize(tmp: Path, meta: UploadMeta) -> tuple[int, dict]:
+async def finalize(tmp: Path, meta: UploadMeta, on_progress=None) -> tuple[int, dict]:
     """Scan, store and record `tmp`. Always consumes (moves or deletes) `tmp`.
 
-    Returns (http_status, json_body).
+    Returns (http_status, json_body). `on_progress(phase, fraction)` reports
+    'checking' | 'starting' | 'scanning' | 'verifying' | 'finishing'.
     """
     try:
-        return await _finalize(tmp, meta)
+        return await _finalize(tmp, meta, on_progress or (lambda *_: None))
     except Exception as exc:
         if storage.is_disk_full_error(exc):
             logger.error("disk full while finalizing %s", meta.orig_name)
@@ -158,7 +172,7 @@ async def finalize(tmp: Path, meta: UploadMeta) -> tuple[int, dict]:
         tmp.unlink(missing_ok=True)
 
 
-async def _finalize(tmp: Path, meta: UploadMeta) -> tuple[int, dict]:
+async def _finalize(tmp: Path, meta: UploadMeta, on_progress) -> tuple[int, dict]:
     size = tmp.stat().st_size
     name = meta.orig_name or "file"
 
@@ -166,7 +180,21 @@ async def _finalize(tmp: Path, meta: UploadMeta) -> tuple[int, dict]:
     if ext_error:
         return 400, {"error": ext_error}
 
-    scan_status, threat = await virus_scan.scan_path(tmp)
+    # Photos/videos whose bytes really are a known media format skip ClamAV
+    # (see app/services/media.py); anything that only *claims* to be media
+    # gets the full scan.
+    on_progress("checking", 0.0)
+    kind = None
+    if settings.SCAN_MEDIA == "light" and settings.CLAMAV_ENABLED:
+        kind = await asyncio.to_thread(media.verify, tmp, name)
+    if kind:
+        scan_status, threat = "media", None
+    elif size > CLAMAV_STREAM_MAX and meta.tier == "trusted":
+        # clamd can't take streams over ~4 GB. Only unlocked uploaders can send
+        # files this big; store them marked as unscanned rather than refuse.
+        scan_status, threat = "unscanned-large", None
+    else:
+        scan_status, threat = await virus_scan.scan_path(tmp, on_progress)
     if scan_status == "infected":
         logger.warning("virus detected: ip=%s file=%s threat=%s", meta.ip, name, threat)
         await audit(meta.ip, meta.ua, "virus_detected", None,
@@ -177,6 +205,7 @@ async def _finalize(tmp: Path, meta: UploadMeta) -> tuple[int, dict]:
         await audit(meta.ip, meta.ua, "scan_unavailable", None, f"filename:{name}")
         return 503, {"error": "Virus scanner unavailable — upload rejected. Try again shortly."}
 
+    on_progress("finishing", 1.0)
     file_id = uuid.uuid4().hex
     safe_name = storage.sanitize_filename(name)
     file_hash = await storage.hash_file(tmp)
@@ -216,8 +245,8 @@ async def _finalize(tmp: Path, meta: UploadMeta) -> tuple[int, dict]:
                 f"size:{size},scan:{scan_status},bypassed:{meta.bypassed}")
 
     warning = None
-    if not meta.bypassed:
-        bw = await check_upload_bandwidth(meta.ip, 0)
+    if not meta.bypassed and meta.tier != "trusted":
+        bw = await check_upload_bandwidth(meta.ip, 0, meta.daily_limit)
         if bw["pct"] >= 80:
             warning = (
                 f"You've used {bw['pct']}% of your daily upload limit "

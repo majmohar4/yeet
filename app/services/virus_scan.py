@@ -1,4 +1,5 @@
 import asyncio
+import os
 import logging
 import socket
 import time
@@ -179,31 +180,46 @@ def _scan_sync(data: bytes) -> tuple[str, str | None]:
     return _instream(data[i:i + step] for i in range(0, len(data), step))
 
 
-def _scan_path_sync(path: str) -> tuple[str, str | None]:
+def _scan_path_sync(path: str, on_progress=None) -> tuple[str, str | None]:
+    total = max(1, os.path.getsize(path))
+
     def gen():
+        sent = 0
         with open(path, "rb") as fh:
             while chunk := fh.read(1_048_576):
                 yield chunk
+                sent += len(chunk)
+                if on_progress:
+                    on_progress("scanning", sent / total)
+        if on_progress:
+            on_progress("verifying", 1.0)  # all bytes sent; clamd finishing its pass
     return _instream(gen())
 
 
-async def _run_scan(fn, arg) -> tuple[str, str | None]:
+async def _run_scan(fn, *args, on_progress=None) -> tuple[str, str | None]:
     global _in_flight, _last_used
     if not settings.CLAMAV_ENABLED:
         return "skipped", None
     _in_flight += 1
     try:
-        if _managed() and not await _ensure_clamd():
-            return "error", None
-        return await asyncio.to_thread(fn, arg)
+        if _managed():
+            if on_progress and not await asyncio.to_thread(_ping_clamav):
+                on_progress("starting", 0.0)  # cold start: ~30-60 s loading signatures
+            if not await _ensure_clamd():
+                return "error", None
+        return await asyncio.to_thread(fn, *args)
     finally:
         _in_flight -= 1
         _last_used = time.monotonic()
 
 
-async def scan_path(path) -> tuple[str, str | None]:
-    """Stream a file on disk to clamd. Same return contract as scan_bytes."""
-    return await _run_scan(_scan_path_sync, str(path))
+async def scan_path(path, on_progress=None) -> tuple[str, str | None]:
+    """Stream a file on disk to clamd. Same return contract as scan_bytes.
+
+    `on_progress(phase, fraction)` is called from a worker thread with phase
+    'starting' | 'scanning' | 'verifying'.
+    """
+    return await _run_scan(_scan_path_sync, str(path), on_progress, on_progress=on_progress)
 
 
 async def scan_bytes(data: bytes) -> tuple[str, str | None]:

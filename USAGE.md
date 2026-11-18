@@ -21,13 +21,21 @@ A practical guide. For deployment see [README](README.md) and [FAQ](FAQ.md); for
   - **Single download** — the file is erased the moment someone downloads it. Link previews in chat apps don't count, so you can paste the link anywhere. Doesn't apply to folders.
 - Each upload gets a row with progress, speed and time left. When it's done the link is copied for you; on phones a **Share** button opens the system share sheet. **Copy all links** appears when several uploads finish.
 
+### Leaving the page
+
+Once a file has finished uploading and shows *Scanning*, you can close the tab — the server finishes on its own. Come back later (same browser) and the upload is listed with its scan progress or its finished link. An upload interrupted *while sending* is listed too: choose the same file again to continue.
+
+### Limits and unlocking
+
+Standard limit is 1 GB per file. If the server owner gave you the unlock password, use **Have an unlock password?** under Options: that browser then gets 10 GB per file for 30 days (**Lock** turns it off). Connections that recently uploaded malware or guessed passwords are limited to 200 MB for a day.
+
 ### Big files
 
 Files are sent in 16 MB pieces, three at a time, so no single request comes near Cloudflare's 100 MB limit.
 
 - A dropped connection only resends the piece that failed. Uploads pause while you are offline and continue when you're back.
 - If you close or reload the tab, pick the same file again within a few hours and the upload continues where it stopped.
-- After the last piece the server runs a virus scan. The first scan after a quiet period waits for the scanner to start (about a minute). The row says *Scanning* meanwhile.
+- Photos and videos that really are photos and videos (checked from their bytes) are published straight away. Everything else gets a virus scan after the last piece: The first scan after a quiet period waits for the scanner to start (about a minute). The row says *Scanning* meanwhile.
 - Keep the tab open until the row shows the link. On phones the screen is kept awake during uploads where the browser allows it.
 
 ## Downloading

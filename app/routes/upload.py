@@ -9,10 +9,9 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 
 from app.middleware.rate_limit import _client_ip, peek_bypass_code
-from app.services import concurrent, ingest, storage
+from app.services import concurrent, ingest, storage, tiers
 from app.services.config_manager import (
     get_file_expiry_hours,
-    get_max_file_size,
     get_storage_limit,
 )
 
@@ -37,15 +36,18 @@ async def index(request: Request):
     limit = get_storage_limit()
     pct = round(total / limit * 100, 1) if limit else 0
     disk_low = not storage.has_room_for(0)
+    tier = await tiers.tier_for(request, _client_ip(request))
     return templates.TemplateResponse(
         "index.html",
         {
             "request": request,
             "storage_pct": pct,
             "storage_warning": pct >= 80 or disk_low,
-            "storage_blocked": pct >= 90 or disk_low,
-            "max_file_mb": get_max_file_size() // 1_048_576,
-            "max_file_bytes": get_max_file_size(),
+            "storage_blocked": (pct >= 90 and not tier.trusted) or disk_low,
+            "max_file_mb": tier.max_file // 1_048_576,
+            "max_file_bytes": tier.max_file,
+            "tier": tier.name,
+            "unlock_available": tiers.unlock_enabled(),
             "expiry_hours": get_file_expiry_hours(),
         },
     )
@@ -101,16 +103,17 @@ async def handle_multipart(
             "Please wait for your current uploads to finish (max 2 at once).", 429
         )
     try:
+        tier = await tiers.tier_for(request, ip)
         declared = int(request.headers.get("content-length") or 0)
-        early = await ingest.precheck(max(0, declared - 4096), ip, bypassed)
+        early = await ingest.precheck(max(0, declared - 4096), ip, bypassed, tier)
         if early is not None:
             return early
 
-        result, size = await spool(upload, None if bypassed else get_max_file_size())
+        result, size = await spool(upload, None if bypassed else tier.max_file)
         if isinstance(result, JSONResponse):
             return result
         tmp = result
-        late = await ingest.precheck(size, ip, bypassed)
+        late = await ingest.precheck(size, ip, bypassed, tier)
         if late is not None:
             tmp.unlink(missing_ok=True)
             return late
@@ -128,6 +131,8 @@ async def handle_multipart(
             session=ingest.parse_session(session_id),
             bypassed=bypassed,
             bypass_code=bypass_code,
+            tier=tier.name,
+            daily_limit=tier.daily,
         )
         status, body = await ingest.finalize(tmp, meta)
         return JSONResponse(body, status_code=status)

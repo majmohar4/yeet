@@ -69,6 +69,12 @@ async def _require_admin(
     )
     if not ok:
         _record_failure(ip)
+        db = await get_db()  # audited: repeated failures mark the IP suspicious
+        await db.execute(
+            "INSERT INTO audit_log (action, client_ip, user_agent) VALUES (?,?,?)",
+            ("admin_bad_login", ip, request.headers.get("user-agent", "")),
+        )
+        await db.commit()
         # Deliberate delay: caps an online guessing loop at ~1 try/sec even
         # before the lockout kicks in.
         await asyncio.sleep(1)

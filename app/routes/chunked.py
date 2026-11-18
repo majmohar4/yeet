@@ -33,7 +33,7 @@ from fastapi.responses import JSONResponse
 from app.config import settings
 from app.database import get_db
 from app.middleware.rate_limit import _client_ip, consume_bypass_code, peek_bypass_code
-from app.services import ingest, storage
+from app.services import ingest, storage, tiers
 from app.services.extensions import _check_extension
 
 logger = logging.getLogger("yeet.chunked")
@@ -45,6 +45,9 @@ _COMPLETE_WAIT = 20  # seconds the complete call waits before answering 202
 
 # Strong refs so finalize tasks aren't garbage-collected mid-flight.
 _tasks: dict[str, asyncio.Task] = {}
+# Live finalize progress per upload: {"phase": str, "progress": 0..1}. Written
+# from the scanner's worker thread; plain dict assignment is atomic enough.
+_progress: dict[str, dict] = {}
 
 
 def _safe_hex(value: str) -> str | None:
@@ -104,6 +107,9 @@ def _public(row: dict, received: list[int] | None = None) -> dict:
     }
     if received is not None:
         out["received"] = received
+    if row["status"] == "processing":
+        p = _progress.get(row["id"])
+        out.update(p or {"phase": "queued", "progress": 0.0})
     if row.get("result"):
         res = json.loads(row["result"])
         out["code"] = res["code"]
@@ -119,7 +125,8 @@ async def create_upload(request: Request):
     ip = _client_ip(request)
     ua = request.headers.get("user-agent", "")[:300]
 
-    if body.get("website"):  # honeypot
+    if body.get("website"):  # honeypot — also marks the IP suspicious
+        await ingest.audit(ip, ua, "bot_rejected", None, "honeypot")
         return ingest.error("Invalid request.", 400)
 
     name = str(body.get("name") or "").strip()[:MAX_NAME_LEN] or "file"
@@ -169,7 +176,8 @@ async def create_upload(request: Request):
             if (await cur.fetchone())[0] >= MAX_BUNDLE_FILES:
                 return ingest.error(f"Folders are limited to {MAX_BUNDLE_FILES} files.", 413)
 
-    rejected = await ingest.precheck(size, ip, bypassed)
+    tier = await tiers.tier_for(request, ip)
+    rejected = await ingest.precheck(size, ip, bypassed, tier)
     if rejected is not None:
         return rejected
 
@@ -185,11 +193,11 @@ async def create_upload(request: Request):
         """INSERT INTO uploads
            (id, orig_name, file_size, chunk_size, chunk_count, password_hash,
             max_downloads, burn_after_read, expiry_hours, bypass_code, client_ip,
-            user_agent, uploader_session, bundle_id, bundle_path, updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            user_agent, uploader_session, bundle_id, bundle_path, updated_at, tier)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (upload_id, name, size, chunk_size, chunk_count, pw_hash, max_dl,
          1 if burn else 0, expiry_hours, bypass_code if bypassed else None, ip, ua,
-         session, bundle_id, bundle_path, _now()),
+         session, bundle_id, bundle_path, _now(), tier.name),
     )
     await db.commit()
     return JSONResponse(
@@ -197,6 +205,32 @@ async def create_upload(request: Request):
          "received": [], "status": "uploading"},
         status_code=201,
     )
+
+
+@router.get("/api/uploads")
+async def my_uploads(request: Request):
+    """Uploads this browser started that aren't finished, or finished in the
+    last hour — so a reload or a later visit can pick them up again. Scoped to
+    the caller's session id; nobody else's uploads are ever listed."""
+    session = request.headers.get("X-Session-ID", "").strip()[:64]
+    if not session:
+        return JSONResponse({"uploads": []})
+    recent = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    db = await get_db()
+    async with db.execute(
+        "SELECT * FROM uploads WHERE uploader_session=? AND bundle_id IS NULL "
+        "AND (status IN ('uploading','processing') OR updated_at > ?) "
+        "ORDER BY created_at",
+        (session, recent),
+    ) as cur:
+        rows = [dict(r) for r in await cur.fetchall()]
+    out = []
+    for row in rows:
+        item = _public(row)
+        if row["status"] == "uploading":
+            item["received_count"] = len(await _received(row["id"]))
+        out.append(item)
+    return JSONResponse({"uploads": out})
 
 
 @router.get("/api/uploads/{upload_id}")
@@ -296,8 +330,8 @@ async def abort_upload(upload_id: str):
     row = await _load(upload_id) if upload_id else None
     if not row:
         return JSONResponse({"ok": True})
-    if row["status"] == "uploading":
-        await _drop(upload_id)
+    if row["status"] in ("uploading", "failed", "done"):
+        await _drop(upload_id)  # the stored file (if done) is untouched
     return JSONResponse({"ok": True})
 
 
@@ -336,8 +370,14 @@ async def _finalize(upload_id: str, base_url: str) -> None:
             bundle_id=row["bundle_id"],
             bundle_path=row["bundle_path"],
             expires_at=expires_at,
+            tier=row["tier"] or "standard",
+            daily_limit=tiers.by_name(row["tier"]).daily,
         )
-        code, body = await ingest.finalize(storage.partial_path(upload_id), meta)
+
+        def report(phase: str, fraction: float) -> None:
+            _progress[upload_id] = {"phase": phase, "progress": round(fraction, 3)}
+
+        code, body = await ingest.finalize(storage.partial_path(upload_id), meta, report)
     except Exception:
         logger.exception("finalize task crashed for %s", upload_id)
         code, body = 500, {"error": "Upload failed on the server. Please try again."}
@@ -353,6 +393,7 @@ async def _finalize(upload_id: str, base_url: str) -> None:
         await db.commit()
     finally:
         _tasks.pop(upload_id, None)
+        _progress.pop(upload_id, None)
 
 
 async def recover_interrupted() -> None:
@@ -417,7 +458,8 @@ async def create_bundle(request: Request):
         return ingest.error(f"Folders are limited to {MAX_BUNDLE_FILES} files.", 413)
 
     bypassed = await peek_bypass_code(str(body.get("bypass_code") or ""))
-    rejected = await ingest.precheck(max(0, total_size), ip, bypassed)
+    tier = await tiers.tier_for(request, ip)
+    rejected = await ingest.precheck(max(0, total_size), ip, bypassed, tier, per_file=False)
     if rejected is not None:
         return rejected
 

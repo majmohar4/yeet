@@ -342,24 +342,53 @@ async function uploadOne(file, opts, hooks, signal) {
       throw e;
     }
     if (res.status === 202) {
-      // Virus scan still running — poll. Survives proxies timing out long requests.
-      for (;;) {
-        await sleep(1500);
-        const { data } = await withRetry(() => api('GET', `/api/uploads/${up.id}`), signal);
-        if (data.status === 'done' || data.status === 'failed') {
-          forgetUpload(fp);
-          if (data.code !== 201) throw new HttpError(data.code, data.result);
-          return data.result;
-        }
-        if (data.status === 'uploading') break; // server restarted; complete again
-      }
-      continue;
+      // Scan still running server-side — poll. Survives proxy timeouts, and
+      // the server keeps going if this page is closed.
+      const result = await pollUpload(up.id, hooks, signal);
+      if (result === 'restart') continue;
+      forgetUpload(fp);
+      return result;
     }
     forgetUpload(fp);
+    markSeen(up.id);
     return res.data;
   }
   throw new HttpError(409, { error: 'Upload could not be completed. Please try again.' });
 }
+
+/** Poll a finalizing upload until done. Returns the result, or 'restart' when
+ *  the server lost the task (restart) and `complete` must be called again. */
+async function pollUpload(id, hooks, signal) {
+  for (;;) {
+    const { data } = await withRetry(() => api('GET', `/api/uploads/${id}`), signal);
+    if (data.status === 'done' || data.status === 'failed') {
+      markSeen(id);
+      if (data.code !== 201) throw new HttpError(data.code, data.result);
+      return data.result;
+    }
+    if (data.status === 'uploading') return 'restart';
+    hooks.scan?.(data.phase, data.progress);
+    await sleep(1200);
+  }
+}
+
+// Uploads whose outcome this browser has already shown, so a finished upload
+// is announced once — not on every later visit.
+const SEEN_KEY = 'yeet_seen_uploads';
+function seenSet() { return new Set(safeJson(store.get(SEEN_KEY, '[]')) || []); }
+function markSeen(id) {
+  const ids = [...seenSet(), id].slice(-100);
+  store.set(SEEN_KEY, JSON.stringify(ids));
+}
+
+const SCAN_PHASE = {
+  queued: 'Waiting for the scanner…',
+  checking: 'Checking the file…',
+  starting: 'Starting the virus scanner — about a minute after a quiet period…',
+  scanning: 'Scanning for viruses',
+  verifying: 'Finishing the virus scan…',
+  finishing: 'Saving…',
+};
 
 // ── Upload page ───────────────────────────────────────────────────────────────
 const dropZone = $('#drop-zone');
@@ -395,6 +424,18 @@ function initUploadPage() {
     expiry_hours: expiry,
     burn: burnInput?.checked ? 1 : 0,
     session_id: getSession(),
+  });
+
+  // Spotlight that follows the cursor across the drop zone.
+  let spotFrame = 0;
+  dropZone.addEventListener('pointermove', e => {
+    if (e.pointerType !== 'mouse' || spotFrame) return;
+    spotFrame = requestAnimationFrame(() => {
+      const r = dropZone.getBoundingClientRect();
+      dropZone.style.setProperty('--mx', `${e.clientX - r.left}px`);
+      dropZone.style.setProperty('--my', `${e.clientY - r.top}px`);
+      spotFrame = 0;
+    });
   });
 
   // Pickers
@@ -488,6 +529,13 @@ function initUploadPage() {
         addJob({ name: f.name, size: f.size, kind: 'file' }).fail(`Too large — the limit is ${fmtSize(CFG.maxFileBytes)} per file.`);
         continue;
       }
+      for (const j of jobs.filter(j => j.state === 'paused' && j.name === f.name && j.size === f.size)) {
+        j.state = 'cancelled'; j.el.remove();
+        // Resumable only if this browser remembered the upload id; otherwise
+        // the new upload replaces it, so drop the stale server-side one.
+        const resumable = Object.values(resumeMap()).some(v => v.id === j.serverId);
+        if (!resumable && j.serverId) api('DELETE', `/api/uploads/${j.serverId}`).catch(() => {});
+      }
       const job = addJob({ name: f.name, size: f.size, kind: 'file', file: f, opts });
       jobs.push(job);
     }
@@ -522,13 +570,17 @@ function initUploadPage() {
   }
   function releaseScreen() { wakeLock?.release?.().catch(() => {}); wakeLock = null; }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && running) lockScreen(); });
-  addEventListener('beforeunload', e => { if (running) { e.preventDefault(); e.returnValue = ''; } });
+  // Only warn while bytes are still leaving this device. Once an upload is
+  // being scanned it finishes on the server whether or not the page is open.
+  addEventListener('beforeunload', e => {
+    if (jobs.some(j => j.sending)) { e.preventDefault(); e.returnValue = ''; }
+  });
 
-  function addJob(spec) {
+  function addJob(spec, quiet = false) {
     queueWrap.classList.remove('hidden');
     // On phones the queue sits below the fold — bring it into view so the
     // upload visibly starts.
-    requestAnimationFrame(() => {
+    if (!quiet) requestAnimationFrame(() => {
       const r = queueWrap.getBoundingClientRect();
       if (r.top > innerHeight - 80 || r.bottom < 0) queueWrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
@@ -549,6 +601,7 @@ function initUploadPage() {
     const job = {
       ...spec, el, state: 'queued', result: null,
       progress(bytes) {
+        job.sending = true;
         const pct = spec.size ? Math.min(100, bytes / spec.size * 100) : 100;
         fill.style.width = pct.toFixed(1) + '%';
         const now = performance.now();
@@ -565,14 +618,32 @@ function initUploadPage() {
         if (text) { msg.textContent = text; msg.dataset.sticky = '1'; } else delete msg.dataset.sticky;
       },
       processing() {
-        el.classList.add('processing');
+        job.sending = false;
+        el.classList.add('processing', 'indeterminate');
         stat.textContent = fmtSize(spec.size);
-        msg.textContent = 'Scanning for viruses — the first upload in a while can take about a minute…';
+        msg.innerHTML = `${esc(SCAN_PHASE.queued)} <span class="muted">You can leave this page — it finishes on the server.</span>`;
         msg.dataset.sticky = '1';
       },
+      scan(phase, fraction) {
+        if (!el.classList.contains('processing')) job.processing();
+        const pct = phase === 'scanning' ? Math.floor((fraction || 0) * 100) : null;
+        el.classList.toggle('indeterminate', pct === null);
+        if (pct !== null) fill.style.width = pct + '%';
+        stat.textContent = pct !== null ? `${pct}% scanned` : fmtSize(spec.size);
+        msg.innerHTML = `${esc(SCAN_PHASE[phase] || SCAN_PHASE.queued)} <span class="muted">You can leave this page — it finishes on the server.</span>`;
+      },
+      paused(pct) {
+        job.state = 'paused';
+        fill.style.width = pct + '%';
+        stat.textContent = `${pct}%`;
+        msg.textContent = 'Interrupted — choose the same file again to continue where it stopped.';
+        msg.dataset.sticky = '1';
+        actions.innerHTML = `<button class="btn btn-quiet" type="button" data-repick>${icon('files')}<span class="only-pointer">Choose file</span></button>
+          <button class="icon-btn" type="button" data-dismiss aria-label="Discard">${icon('x')}</button>`;
+      },
       fail(text) {
-        job.state = 'failed';
-        el.classList.remove('processing'); el.classList.add('failed');
+        job.state = 'failed'; job.sending = false;
+        el.classList.remove('processing', 'indeterminate'); el.classList.add('failed');
         msg.textContent = text; delete msg.dataset.sticky;
         stat.textContent = fmtSize(spec.size);
         actions.innerHTML = (spec.file || spec.items)
@@ -583,8 +654,8 @@ function initUploadPage() {
         return job;
       },
       succeed(res, label) {
-        job.state = 'done'; job.result = res;
-        el.classList.remove('processing'); el.classList.add('done');
+        job.state = 'done'; job.result = res; job.sending = false;
+        el.classList.remove('processing', 'indeterminate'); el.classList.add('done');
         fill.style.width = '100%';
         stat.textContent = fmtSize(res.size ?? res.total_size ?? spec.size);
         delete msg.dataset.sticky;
@@ -601,7 +672,14 @@ function initUploadPage() {
       async run() {
         el.classList.remove('failed', 'done');
         try {
-          if (spec.kind === 'folder') await runFolder(job, ctrl.signal);
+          if (spec.restoredId) {
+            const res = await pollUpload(spec.restoredId, job, ctrl.signal);
+            if (res === 'restart') {
+              await api('POST', `/api/uploads/${spec.restoredId}/complete`).catch(() => {});
+              job.state = 'queued'; return;
+            }
+            job.succeed(res, 'Finished — ' + spec.name);
+          } else if (spec.kind === 'folder') await runFolder(job, ctrl.signal);
           else {
             const res = await uploadOne(spec.file, spec.opts, job, ctrl.signal);
             const copied = await copyText(res.url);
@@ -609,6 +687,7 @@ function initUploadPage() {
           }
         } catch (e) {
           if (e.name === 'AbortError') return;
+          job.sending = false;
           job.fail(e.message || 'Upload failed');
           if (e.status === 507 || e.status === 429) toast(e.message, 'error');
         }
@@ -617,9 +696,12 @@ function initUploadPage() {
 
     el.addEventListener('click', async e => {
       if (e.target.closest('[data-cancel]')) {
-        ctrl.abort(); job.state = 'cancelled'; el.remove(); updateQueueTools();
+        ctrl.abort(); job.state = 'cancelled'; job.sending = false; el.remove(); updateQueueTools();
       } else if (e.target.closest('[data-dismiss]')) {
+        if (spec.serverId) api('DELETE', `/api/uploads/${spec.serverId}`).catch(() => {});
         el.remove(); job.state = 'cancelled'; updateQueueTools();
+      } else if (e.target.closest('[data-repick]')) {
+        fileInput.click();
       } else if (e.target.closest('[data-retry]')) {
         actions.innerHTML = `<button class="icon-btn" type="button" data-cancel aria-label="Cancel">${icon('x')}</button>`;
         msg.textContent = 'Retrying…'; job.state = 'queued'; pump();
@@ -676,9 +758,87 @@ function initUploadPage() {
     copyWithToast(urls.join('\n'), `${urls.length} links copied`);
   });
 
+  // ── Pick up this browser's uploads after a reload or a later visit ────────
+  async function restoreUploads() {
+    let list;
+    try { list = (await api('GET', '/api/uploads')).data.uploads || []; } catch { return; }
+    const seen = seenSet();
+    for (const u of list) {
+      if (jobs.some(j => j.restoredId === u.id || j.serverId === u.id)) continue;
+      if (u.status === 'processing') {
+        const job = addJob({ name: u.name, size: u.size, kind: 'file', restoredId: u.id, serverId: u.id }, true);
+        jobs.push(job);
+        job.scan(u.phase, u.progress);
+        pump();
+      } else if (u.status === 'uploading') {
+        const job = addJob({ name: u.name, size: u.size, kind: 'file', serverId: u.id }, true);
+        const pct = u.chunk_count ? Math.floor((u.received_count || 0) / u.chunk_count * 100) : 0;
+        jobs.push(job);
+        job.paused(pct);
+      } else if (!seen.has(u.id)) {
+        const job = addJob({ name: u.name, size: u.size, kind: 'file', serverId: u.id }, true);
+        jobs.push(job);
+        if (u.code === 201) job.succeed(u.result, null);
+        else job.fail((u.result && u.result.error) || 'Upload failed');
+        markSeen(u.id);
+      }
+    }
+  }
+
   initFileList();
   initClipboard();
   initScannerLog();
+  initUnlock();
+  restoreUploads();
+}
+
+// ── Unlock password (bigger limits for this browser) ──────────────────────────
+function initUnlock() {
+  const box = $('#tier-box');
+  if (!box) return;
+  const modal = $('#unlock-modal'), form = $('#unlock-form'), input = $('#unlock-input');
+  const err = $('#unlock-error'), submit = $('#unlock-submit');
+
+  const showLimit = bytes => {
+    CFG.maxFileBytes = bytes;
+    for (const id of ['limit-file', 'intro-limit']) { const el = $('#' + id); if (el) el.textContent = fmtSize(bytes); }
+  };
+  const renderUnlocked = () => {
+    box.dataset.tier = 'trusted';
+    box.innerHTML = `<span class="tier-badge">${icon('key')}Unlocked</span>
+      <span class="tier-text">Bigger uploads are on for this browser.</span>
+      <button class="btn btn-quiet btn-sm" type="button" id="lock-btn">Lock</button>`;
+  };
+
+  box.addEventListener('click', async e => {
+    if (e.target.closest('#unlock-open')) {
+      input.value = ''; err.textContent = '';
+      openModal(modal);
+    } else if (e.target.closest('#lock-btn')) {
+      try { await api('POST', '/api/lock'); } catch { /* cookie may already be gone */ }
+      toast('Locked — standard limits again', 'info');
+      setTimeout(() => location.reload(), 600);
+    }
+  });
+
+  form?.addEventListener('submit', async e => {
+    e.preventDefault();
+    err.textContent = '';
+    submit.disabled = true;
+    try {
+      const { data } = await api('POST', '/api/unlock', { password: input.value });
+      closeModal(modal);
+      renderUnlocked();
+      showLimit(data.max_file_bytes);
+      box.classList.add('celebrate');
+      toast(`Unlocked — up to ${fmtSize(data.max_file_bytes)} per file`, 'success');
+    } catch (ex) {
+      err.textContent = ex.message || 'Could not unlock.';
+      input.select();
+    } finally {
+      submit.disabled = false;
+    }
+  });
 }
 
 async function walkDirectory(root) {
