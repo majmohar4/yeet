@@ -2,7 +2,7 @@
 
 yeet uses a **permissive** extension policy: any reasonably-shaped extension passes (`^\.[a-z0-9_+-]{1,12}$`), plus the named list below for known types. ClamAV scans every file regardless. Files without an extension also work.
 
-The lists below come straight from `app/routes/upload.py` — that file is the source of truth.
+The lists below come straight from `app/services/extensions.py` — that file is the source of truth.
 
 ## Three tiers
 

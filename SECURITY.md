@@ -62,14 +62,16 @@ I aim to acknowledge reports within 48 hours and provide a fix or mitigation tim
 | XSS prevention | Jinja2 auto-escaping + `Content-Security-Policy` header |
 | Clickjacking prevention | `X-Frame-Options: DENY` + CSP `frame-ancestors 'none'` |
 | MIME sniffing prevention | `X-Content-Type-Options: nosniff` |
-| Virus scanning | ClamAV via TCP socket (INSTREAM protocol) |
+| Virus scanning | ClamAV via TCP socket (INSTREAM), streamed from disk; uploads are published only after a clean scan |
 | Rate limiting | Per-IP byte-bucket on uploads (24 h rolling), per-IP count on downloads (1 h sliding), in-memory count on previews |
 | Client IP resolution | Proxy-set `REAL_IP_HEADER`, else the Nth-from-right `X-Forwarded-For` hop; caller-supplied left-most entries are ignored |
 | Ownership checks | Upload session ids stay server-side; listings expose only a boolean `is_yours`, deletes compare with `secrets.compare_digest` |
 | Admin brute-force | 1 s delay per failed login + per-IP lockout after `ADMIN_MAX_ATTEMPTS` |
 | Scanner outage | Uploads fail closed (HTTP 503) when clamd is unreachable |
-| Concurrent uploads | In-memory semaphore, 2 / IP |
-| Burn-after-read | Atomic `UPDATE … WHERE claimed_at IS NULL`; only one downloader can win |
+| Concurrent uploads | In-memory semaphore, 2 multipart uploads / IP; at most `MAX_ACTIVE_UPLOADS` unfinished chunked uploads / IP |
+| Chunked uploads | Unguessable 128-bit upload IDs; every chunk length is checked against the declared size; folder members need the folder's secret `upload_token`; abandoned partials are purged |
+| Disk exhaustion | Full upload size reserved with `posix_fallocate` before accepting; `MIN_FREE_DISK_MB` kept spare; ENOSPC returns 507 |
+| Burn-after-read | Atomic `UPDATE … WHERE claimed_at IS NULL`; only one downloader can win. Link-preview bots get the landing page and Range requests are refused, so neither can spend the view |
 | Audit logging | All uploads, downloads, and admin actions logged |
 | Non-root container | App runs as UID 1000 inside Docker |
 | Capability drop | Docker `cap_drop: ALL`, `no-new-privileges` |
@@ -83,11 +85,11 @@ Filename extensions are **not** the security boundary. The allow-list is permiss
 
 1. **ClamAV scans every byte** before the file is committed.
 2. **Files are stored by random UUID with no extension** under `/data/uploads/<uuid>` — nothing the server reaches for can be executed.
-3. **`/f/<id>` always sends `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`.** Browsers will download, never render.
+3. **`/f/<id>` file responses always send `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`.** Browsers will download, never render. A browser navigation without `?dl=1` gets a server-rendered landing page instead of the bytes; previews on it go through `/raw/<id>`.
 4. **`/raw/<id>` is hardened by type:**
    - Web-renderable types (`.html .htm .svg .js .wasm` …) are served as `text/plain; charset=utf-8` so the browser shows source — no script execution, no fake-login phishing.
    - Executables (`.exe .msi .dll .so .dmg .deb .rpm .bat .ps1 .sh .vbs .scr .hta` …) are refused outright (HTTP 403). They can only be downloaded via `/f/<id>`.
-   - Everything else keeps its declared MIME plus a `default-src 'none'; img-src 'self'; style-src 'unsafe-inline';` CSP that blocks scripts, fetches, forms, and frames.
+   - Everything else keeps its declared MIME plus a `default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline';` CSP that blocks scripts, fetches, forms, and frames.
    - Only types a preview can actually render are served; anything else is redirected to `/f/<id>`, which counts the download and enforces the hourly limit.
    - A spent `max_downloads` cap returns 410 here too, so `/raw` can't be used to keep fetching a file past its limit. Previews themselves are not counted as downloads — one grid render requests a thumbnail per file — but they carry their own, much higher, per-IP ceiling (`RATE_LIMIT_PREVIEWS`).
 5. **Burn-after-read** files are also refused by `/raw/<id>` so a preview can never silently consume the only view, and they are permanently deleted from disk + archive the instant they're served.

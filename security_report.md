@@ -1,3 +1,5 @@
+> **Historical report for 1.0.0 (2025-06-01).** The current test suite lives in `tests/test_security.py` and covers later additions (chunked uploads, ranged downloads, burn-after-read, client-IP resolution). Run it with `./test.sh`.
+
 # Security Test Report
 
 **Project:** yeet — minimal file sharing server  

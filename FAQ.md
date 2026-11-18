@@ -42,17 +42,15 @@ To bypass the limit for a single upload, use a bypass code (see above).
 
 ## Why is ClamAV slow on first run?
 
-ClamAV needs to download its virus definition database (~300MB) on first start. This is completely normal. The download happens inside the container and can take 2–5 minutes depending on your connection.
+ClamAV needs to download its virus definition database (~170MB) on first start. This is completely normal. The download happens inside the container and can take 2–5 minutes depending on your connection.
 
-Once downloaded, the definitions are stored in the `clamav-db` Docker volume and reused on every restart. Subsequent starts are fast.
+Once downloaded, the definitions are stored in `/data/clamav-db` and reused on every restart.
 
-You can watch it happen:
+clamd itself (about 1 GB of RAM) is started by the app on the first upload and stopped after `CLAMAV_IDLE_MINUTES` of inactivity, so the first upload after a quiet period waits roughly a minute while it loads. Set `CLAMAV_IDLE_MINUTES=0` to keep it running. Watch it with:
 
 ```bash
-docker compose logs -f clamav
+docker compose logs -f yeet | grep -i clamd
 ```
-
-Wait until you see `socket found, clamd started.`
 
 If you want to disable virus scanning entirely (not recommended for production), set `CLAMAV_ENABLED=false` in `.env`.
 
@@ -73,27 +71,40 @@ If you're exposing yeet behind a reverse proxy (recommended), keep it bound to `
 
 ## How do I back up files?
 
-Everything lives in two Docker volumes:
+Everything lives in one host folder, mounted at `/data` — `YEET_DATA_DIR` in `.env` (default `./data` next to `docker-compose.yml`):
 
-| Volume | Contents |
+| Path | Contents |
 |---|---|
-| `yeet-data` | Uploads, archive, SQLite database |
-| `clamav-db` | Virus definitions (can be re-downloaded, not critical) |
+| `uploads/`, `archive/` | File contents, named by random ID |
+| `yeet.db` | SQLite database (metadata, audit log) |
+| `config.json` | Runtime settings written by the CLI |
+| `clipboard/` | Clipboard images |
+| `partial/` | Uploads in progress (safe to lose) |
+| `clamav-db/` | Virus definitions (re-downloadable) |
 
-Back up `yeet-data`:
-
-```bash
-# Dump to a tar file
-docker run --rm -v yeet_yeet-data:/data -v $(pwd):/backup \
-  alpine tar czf /backup/yeet-backup-$(date +%Y%m%d).tar.gz /data
-```
-
-To restore:
+Take a consistent copy of the database while the app runs, then archive the rest:
 
 ```bash
-docker run --rm -v yeet_yeet-data:/data -v $(pwd):/backup \
-  alpine sh -c "cd /data && tar xzf /backup/yeet-backup-20250101.tar.gz --strip-components=1"
+docker exec yeet python -c "import sqlite3; s=sqlite3.connect('/data/yeet.db'); d=sqlite3.connect('/tmp/yeet.db'); s.backup(d); d.close()"
+docker cp yeet:/tmp/yeet.db ./yeet-$(date +%Y%m%d).db
+tar czf yeet-files-$(date +%Y%m%d).tar.gz -C "$YEET_DATA_DIR" uploads archive clipboard config.json
 ```
+
+To restore, stop the container, put the files back in the data folder, and start it again.
+
+---
+
+## Uploads fail with "out of disk space" but `df` shows free space
+
+The data folder is probably on a pooled or quota-limited filesystem. mergerfs with `minfreespace=…` only creates files on branches that have at least that much free, so once every branch is below it, every new file fails with `ENOSPC` while `df` still reports the pool's total. Move `YEET_DATA_DIR` to a plain disk (stop the container, `cp -a` the folder, update `.env`, start again) or free space on a branch.
+
+yeet reserves the full size of an upload before accepting it and keeps `MIN_FREE_DISK_MB` (default 2 GB) spare, so a full disk shows a clear message instead of a broken upload.
+
+---
+
+## How do large uploads get past Cloudflare's 100 MB limit?
+
+The browser and the `yeet` CLI split files into 16 MB chunks (`CHUNK_SIZE`) and send each as its own request, so the limit never applies. Raise the per-file limit with `docker exec yeet yeet set-file-limit 2GB` — it takes effect immediately. Plain `curl -F … /raw` still sends one request and is therefore capped by your proxy.
 
 ---
 
@@ -118,7 +129,7 @@ Yes. Add this to your `.env`:
 CLAMAV_ENABLED=false
 ```
 
-And remove (or comment out) the `clamav` service from `docker-compose.yml`, along with the `depends_on` block in the `yeet` service.
+ClamAV runs inside the yeet container, so nothing else needs changing; with scanning off, clamd is never started.
 
 Files uploaded with scanning disabled will show `scan_status: skipped` in API responses.
 
@@ -156,7 +167,7 @@ Set `FILE_EXPIRY_HOURS` in `.env`:
 FILE_EXPIRY_HOURS=72   # 3 days
 ```
 
-Restart the container for changes to take effect. This only affects new uploads — existing files keep their original expiry.
+Restart the container for changes to take effect, or change it live with `docker exec yeet yeet set-expiry 72`. This is the default; uploaders can still pick 1 hour to 7 days. Existing files keep their original expiry.
 
 ---
 
@@ -170,7 +181,7 @@ YEET_ADMIN_PASSWORD=pass yeet cleanup
 curl -u admin:pass -X POST https://yeet.example.com/admin/cleanup
 ```
 
-Expired files are moved to `/data/archive/`, not deleted. To actually free disk space, delete files from the archive directory.
+Expired files are moved to `/data/archive/` and permanently deleted 24 hours later by the same task.
 
 ---
 
@@ -184,7 +195,7 @@ Check current usage:
 YEET_ADMIN_PASSWORD=pass yeet stats
 ```
 
-The ClamAV database takes ~300MB in the `clamav-db` volume.
+The ClamAV database takes about 170 MB in `/data/clamav-db`.
 
 ---
 
@@ -197,12 +208,14 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env  # fill in SECRET_KEY
 
-mkdir -p data/uploads data/archive
+mkdir -p data/uploads data/archive data/partial
 
 # Override data paths for local development
+export BASE_DIR=./data
 export DB_PATH=./data/yeet.db
 export UPLOAD_DIR=./data/uploads
 export ARCHIVE_DIR=./data/archive
+export PARTIAL_DIR=./data/partial
 export CLAMAV_ENABLED=false  # unless you have clamd running locally
 
 uvicorn app.main:app --host 0.0.0.0 --port 8000
