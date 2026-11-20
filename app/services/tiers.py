@@ -1,13 +1,16 @@
 """
 Upload limits per visitor.
 
+  admin       — unlock cookie earned with ADMIN_PASSWORD: trusted limits, and
+                uploads skip the ClamAV scan.
   trusted     — holds a valid unlock cookie (secret UNLOCK_PASSWORD entered in
                 the app): big per-file and daily limits, no storage-cap check.
   standard    — everyone else: the admin-configured per-file limit.
   suspicious  — an IP with recent abuse signals in the audit log: small limits.
 
-The unlock cookie is an HMAC-signed, expiring token. The MAC covers a hash of
-the current UNLOCK_PASSWORD, so changing the password revokes every cookie.
+The unlock cookie is an HMAC-signed, expiring token (never the password). The
+MAC covers a hash of the password it was issued for, so changing that password
+revokes every cookie it issued.
 """
 import hashlib
 import hmac
@@ -35,55 +38,79 @@ SUSPICIOUS_SIGNALS = {
 
 @dataclass(frozen=True)
 class Tier:
-    name: str           # trusted | standard | suspicious
+    name: str           # admin | trusted | standard | suspicious
     max_file: int
     daily: int
 
     @property
     def trusted(self) -> bool:
-        return self.name == "trusted"
+        return self.name in ("trusted", "admin")
+
+
+def _unlock_pw() -> str:
+    return settings.UNLOCK_PASSWORD if len(settings.UNLOCK_PASSWORD) >= 12 else ""
 
 
 def unlock_enabled() -> bool:
-    return len(settings.UNLOCK_PASSWORD) >= 12
+    return bool(_unlock_pw() or settings.ADMIN_PASSWORD)
 
 
-def _pw_fingerprint() -> str:
-    return hashlib.sha256(settings.UNLOCK_PASSWORD.encode()).hexdigest()
+def _password_for(kind: str) -> str:
+    return settings.ADMIN_PASSWORD if kind == "admin" else _unlock_pw()
 
 
-def _sign(exp: int, nonce: str) -> str:
-    msg = f"unlock|{exp}|{nonce}|{_pw_fingerprint()}".encode()
+def _sign(kind: str, exp: int, nonce: str) -> str:
+    fp = hashlib.sha256(_password_for(kind).encode()).hexdigest()
+    msg = f"{kind}|{exp}|{nonce}|{fp}".encode()
     return hmac.new(settings.SECRET_KEY.encode(), msg, hashlib.sha256).hexdigest()
 
 
-def issue_token() -> tuple[str, int]:
+def issue_token(kind: str = "unlock") -> tuple[str, int]:
     ttl = settings.UNLOCK_TTL_DAYS * 86400
     exp = int(time.time()) + ttl
     nonce = secrets.token_hex(8)
-    return f"{exp}.{nonce}.{_sign(exp, nonce)}", ttl
+    return f"{kind}.{exp}.{nonce}.{_sign(kind, exp, nonce)}", ttl
 
 
-def token_expiry(token: str | None) -> int | None:
-    """Expiry timestamp of a valid token, else None."""
-    if not token or not unlock_enabled():
+def token_info(token: str | None) -> tuple[str, int] | None:
+    """(kind, expiry) of a valid token, else None. kind is 'unlock' or 'admin'."""
+    if not token:
         return None
+    parts = token.split(".")
+    if len(parts) == 3:  # pre-admin cookies: exp.nonce.sig
+        parts = ["unlock", *parts]
     try:
-        exp_s, nonce, sig = token.split(".", 2)
+        kind, exp_s, nonce, sig = parts
         exp = int(exp_s)
     except ValueError:
         return None
-    if exp < time.time() or not hmac.compare_digest(sig, _sign(exp, nonce)):
+    if kind not in ("unlock", "admin") or not _password_for(kind):
         return None
-    return exp
+    if exp < time.time() or not hmac.compare_digest(sig, _sign(kind, exp, nonce)):
+        return None
+    return kind, exp
 
 
-def check_password(candidate: str) -> bool:
-    if not unlock_enabled() or not candidate:
-        return False
+def token_expiry(token: str | None) -> int | None:
+    info = token_info(token)
+    return info[1] if info else None
+
+
+def _same(candidate: str, secret: str) -> bool:
     a = hashlib.sha256(candidate.encode()).digest()
-    b = hashlib.sha256(settings.UNLOCK_PASSWORD.encode()).digest()
+    b = hashlib.sha256(secret.encode()).digest()
     return hmac.compare_digest(a, b)
+
+
+def check_password(candidate: str) -> str | None:
+    """Token kind the password earns ('admin' or 'unlock'), else None."""
+    if not candidate:
+        return None
+    if settings.ADMIN_PASSWORD and _same(candidate, settings.ADMIN_PASSWORD):
+        return "admin"
+    if _unlock_pw() and _same(candidate, _unlock_pw()):
+        return "unlock"
+    return None
 
 
 async def is_suspicious(ip: str) -> bool:
@@ -98,8 +125,8 @@ async def is_suspicious(ip: str) -> bool:
 
 
 def by_name(name: str | None) -> Tier:
-    if name == "trusted":
-        return Tier("trusted", settings.TRUSTED_MAX_FILE_SIZE, settings.TRUSTED_DAILY_LIMIT)
+    if name in ("trusted", "admin"):
+        return Tier(name, settings.TRUSTED_MAX_FILE_SIZE, settings.TRUSTED_DAILY_LIMIT)
     if name == "suspicious":
         return Tier("suspicious", settings.SUSPICIOUS_MAX_FILE_SIZE,
                     settings.SUSPICIOUS_DAILY_LIMIT)
@@ -107,8 +134,9 @@ def by_name(name: str | None) -> Tier:
 
 
 async def tier_for(request: Request, ip: str) -> Tier:
-    if token_expiry(request.cookies.get(COOKIE)):
-        return by_name("trusted")
+    info = token_info(request.cookies.get(COOKIE))
+    if info:
+        return by_name("admin" if info[0] == "admin" else "trusted")
     if await is_suspicious(ip):
         return by_name("suspicious")
     return by_name("standard")

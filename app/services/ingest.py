@@ -187,9 +187,12 @@ async def _finalize(tmp: Path, meta: UploadMeta, on_progress) -> tuple[int, dict
     kind = None
     if settings.SCAN_MEDIA == "light" and settings.CLAMAV_ENABLED:
         kind = await asyncio.to_thread(media.verify, tmp, name)
-    if kind:
+    if meta.tier == "admin":
+        # The owner asked for their own uploads to skip the scan.
+        scan_status, threat = "skipped-admin", None
+    elif kind:
         scan_status, threat = "media", None
-    elif size > CLAMAV_STREAM_MAX and meta.tier == "trusted":
+    elif size > CLAMAV_STREAM_MAX and meta.tier in ("trusted", "admin"):
         # clamd can't take streams over ~4 GB. Only unlocked uploaders can send
         # files this big; store them marked as unscanned rather than refuse.
         scan_status, threat = "unscanned-large", None
@@ -245,7 +248,7 @@ async def _finalize(tmp: Path, meta: UploadMeta, on_progress) -> tuple[int, dict
                 f"size:{size},scan:{scan_status},bypassed:{meta.bypassed}")
 
     warning = None
-    if not meta.bypassed and meta.tier != "trusted":
+    if not meta.bypassed and meta.tier not in ("trusted", "admin"):
         bw = await check_upload_bandwidth(meta.ip, 0, meta.daily_limit)
         if bw["pct"] >= 80:
             warning = (

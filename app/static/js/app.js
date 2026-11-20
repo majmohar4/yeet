@@ -803,10 +803,11 @@ function initUnlock() {
     CFG.maxFileBytes = bytes;
     for (const id of ['limit-file', 'intro-limit']) { const el = $('#' + id); if (el) el.textContent = fmtSize(bytes); }
   };
-  const renderUnlocked = () => {
-    box.dataset.tier = 'trusted';
+  const renderUnlocked = tier => {
+    box.dataset.tier = tier;
+    const note = tier === 'admin' ? ' Admin: virus scan skipped.' : '';
     box.innerHTML = `<span class="tier-badge">${icon('key')}Unlocked</span>
-      <span class="tier-text">Bigger uploads are on for this browser.</span>
+      <span class="tier-text">Bigger uploads are on for this browser.${note}</span>
       <button class="btn btn-quiet btn-sm" type="button" id="lock-btn">Lock</button>`;
   };
 
@@ -828,7 +829,7 @@ function initUnlock() {
     try {
       const { data } = await api('POST', '/api/unlock', { password: input.value });
       closeModal(modal);
-      renderUnlocked();
+      renderUnlocked(data.tier);
       showLimit(data.max_file_bytes);
       box.classList.add('celebrate');
       toast(`Unlocked — up to ${fmtSize(data.max_file_bytes)} per file`, 'success');

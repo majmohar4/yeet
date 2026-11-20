@@ -57,16 +57,17 @@ async def unlock(request: Request):
         body = {}
     password = str((body or {}).get("password") or "")[:256]
 
-    if not tiers.check_password(password):
+    kind = tiers.check_password(password)
+    if not kind:
         tiers.record_failure(ip)
         await ingest.audit(ip, ua, "unlock_failed", None, None)
         logger.warning("unlock failed: ip=%s", ip)
         await asyncio.sleep(1)  # caps online guessing even before the lockout
         return ingest.error("Wrong password.", 403)
 
-    token, ttl = tiers.issue_token()
-    await ingest.audit(ip, ua, "unlock", None, None)
-    tier = tiers.by_name("trusted")
+    token, ttl = tiers.issue_token(kind)
+    await ingest.audit(ip, ua, "admin_unlock" if kind == "admin" else "unlock", None, None)
+    tier = tiers.by_name("admin" if kind == "admin" else "trusted")
     exp = tiers.token_expiry(token)
     resp = JSONResponse(await _limits(request, ip, tier, exp))
     resp.set_cookie(

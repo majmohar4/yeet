@@ -57,9 +57,9 @@
       <div class="limit"><b><span class="live-dot" aria-hidden="true"></span>ClamAV</b><span>virus scanning on</span></div>
     </div>
     <div class="tier-box" id="tier-box" data-tier="{{ tier }}" data-unlock="{{ '1' if unlock_available else '0' }}">
-      {% if tier == 'trusted' %}
+      {% if tier in ('trusted', 'admin') %}
         <span class="tier-badge"><svg class="icon"><use href="#i-key"/></svg>Unlocked</span>
-        <span class="tier-text">Bigger uploads are on for this browser.</span>
+        <span class="tier-text">Bigger uploads are on for this browser.{% if tier == 'admin' %} Admin: virus scan skipped.{% endif %}</span>
         <button class="btn btn-quiet btn-sm" type="button" id="lock-btn">Lock</button>
       {% elif tier == 'suspicious' %}
         <span class="tier-text warn"><svg class="icon"><use href="#i-alert"/></svg>Uploads from your connection are limited for now because of recent unusual activity.</span>
